@@ -1,0 +1,19 @@
+# Data — keep raw downloads out of version control (they're large and reproducible)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Claude Code local settings (keep .claude/agents/ tracked, ignore machine-local config)
+.claude/settings.local.json
+.claude/sessions/
