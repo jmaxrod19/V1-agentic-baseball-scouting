@@ -224,13 +224,22 @@ def pitcher_arsenal(
             if "release_spin_rate" in group.columns else None
         )
 
-        # Horizontal break: pfx_x is in FEET (the Statcast standard). Multiply
-        # by 12 to convert to inches, which is the front-office reporting unit.
-        # Positive = arm-side run; negative = glove-side.
-        # We capture the mean first, then multiply — avoids `None * 12` TypeError
-        # if _safe_mean returns None (all values NaN after dropna).
+        # Horizontal break: pfx_x is in FEET (Statcast standard); ×12 → inches,
+        # the front-office reporting unit.
+        #
+        # SIGN CONVENTION (industry standard): a right-handed pitcher's arm-side
+        # run is POSITIVE, glove-side is negative — so a RHP's fastball/changeup
+        # read positive and his slider/curve read negative. Raw Statcast pfx_x is
+        # from the catcher's perspective, where a RHP's arm-side run comes out
+        # NEGATIVE, so we negate it. This is a single fixed flip (not
+        # handedness-aware): a left-handed pitcher's arm-side run is the mirror
+        # image and therefore reads negative, which is exactly the scouting
+        # convention ("righty fastball +HB, lefty fastball −HB").
+        #
+        # Capture the mean first, then transform — avoids `None * 12` TypeError
+        # when _safe_mean returns None (all pfx_x NaN after dropna).
         _pfx_x = _safe_mean(group["pfx_x"]) if "pfx_x" in group.columns else None
-        row["h_break_in"] = _pfx_x * 12 if _pfx_x is not None else None
+        row["h_break_in"] = -(_pfx_x * 12) if _pfx_x is not None else None
 
         # Vertical break: pfx_z, same foot-to-inch conversion.
         # Positive = "rise" (less gravity drop than a theoretical spinless pitch);
