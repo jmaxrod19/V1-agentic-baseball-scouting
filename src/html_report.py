@@ -98,11 +98,20 @@ _CSS = """
       text-transform: uppercase; letter-spacing: 0.05em;
     }
     .report-table tr:last-child td { border-bottom: none; }
+    .visual-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    .visual-block {
+      background: var(--panel); border: 1px solid var(--line);
+      padding: 14px; border-radius: 8px; page-break-inside: avoid;
+    }
+    .visual-block img {
+      width: 100%; height: auto; display: block;
+      border: 1px solid var(--line); background: white;
+    }
     .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
     @media print {
       body { background: white; }
       .page { max-width: none; padding: 0; }
-      .card, .report-table { break-inside: avoid; }
+      .card, .report-table, .visual-block { break-inside: avoid; }
     }
 """
 
@@ -340,6 +349,50 @@ def _location_table(location: pd.DataFrame) -> str:
 
 
 # ===========================================================================
+# Visuals section (charts)
+# ===========================================================================
+
+def _visual_block(title: str, data_uri: str) -> str:
+    """One bordered panel: a heading plus an embedded PNG image."""
+    return (
+        f'<div class="visual-block"><h3>{title}</h3>'
+        f'<img alt="{title}" src="{data_uri}"></div>'
+    )
+
+
+def _visuals_section(
+    arsenal: pd.DataFrame,
+    splits: pd.DataFrame,
+    pitches: pd.DataFrame,
+    throws: str,
+) -> str:
+    """Build the whole Visuals section from the five charts.
+
+    charts is imported lazily (inside this function) so a table-only report
+    never pays matplotlib's import cost or requires it to be installed.
+    """
+    try:
+        from . import charts
+    except ImportError:
+        import charts
+
+    blocks = [
+        _visual_block("Pitch Usage", charts.pitch_usage_bar(arsenal)),
+        _visual_block("Velocity by Pitch", charts.velocity_bar(arsenal)),
+        _visual_block("Movement Plot", charts.movement_plot(arsenal, throws)),
+        _visual_block("Location Heatmaps", charts.location_heatmaps(pitches, arsenal)),
+        _visual_block("Handedness Split Usage", charts.handedness_split_bars(splits)),
+    ]
+    return (
+        '<div class="section">\n'
+        '      <h2>Visuals</h2>\n'
+        '      <div class="visual-grid">\n'
+        + "\n".join(blocks)
+        + "\n      </div>\n    </div>"
+    )
+
+
+# ===========================================================================
 # Public API
 # ===========================================================================
 
@@ -350,6 +403,7 @@ def pitcher_html_report(
     *,
     pitcher_name: str,
     throws: str,
+    pitches: pd.DataFrame | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a full HTML scouting-report document.
@@ -360,16 +414,24 @@ def pitcher_html_report(
         splits:       metrics.pitcher_handedness_splits() output.
         pitcher_name: Display name, e.g. 'Chase Burns'.
         throws:       Handedness phrase, e.g. 'Right-handed'.
+        pitches:      Optional raw pitch-level rows for this pitcher. When given,
+                      the report includes the Visuals section (five charts);
+                      when None, tables only.
         subtitle:     Small print after the handedness in the subhead.
 
     Returns:
-        A complete, self-contained HTML string (no external CSS).
+        A complete, self-contained HTML string (no external CSS or images).
 
     Keyword-only args after `*` force callers to name them at the call site —
     prevents accidentally swapping pitcher_name and throws.
     """
     cards = _build_cards(pitcher_name, throws, arsenal)
     bullets = _build_summary(arsenal, location, splits)
+
+    # Charts are optional: only rendered when raw pitch data is supplied.
+    visuals_html = ""
+    if pitches is not None:
+        visuals_html = _visuals_section(arsenal, splits, pitches, throws)
 
     cards_html = "\n".join(
         f'<div class="card"><div class="card-label">{label}</div>'
@@ -419,6 +481,8 @@ def pitcher_html_report(
       <h2>Location Summary</h2>
       {_location_table(location)}
     </div>
+
+    {visuals_html}
 
     <div class="footer-note">
       Built for browser viewing now and structured to print cleanly to PDF later.

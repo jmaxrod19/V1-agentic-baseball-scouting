@@ -248,6 +248,7 @@ def main() -> None:
             splits,
             pitcher_name=canonical_name,
             throws=_throws_label(df_pitcher),
+            pitches=df_pitcher,  # raw rows enable the Visuals section (charts)
         )
         # HTML is a file format, not terminal output — always write it, and
         # tell the user where it landed rather than dumping markup to stdout.
