@@ -5,7 +5,9 @@ All rates are stored as decimals (0.0–1.0). Converting to display percentages
 happens at the report layer, not here, so report math never mixes 0.254 and 25.4.
 
 Public functions:
-    pitcher_arsenal(df, pitcher=None) -> pd.DataFrame
+    pitcher_arsenal(df, pitcher=None)           -> per-pitch-type summary
+    pitcher_location(df, pitcher=None)          -> per-pitch-type plate location
+    pitcher_handedness_splits(df, pitcher=None) -> per (batter hand, pitch type)
 """
 
 from __future__ import annotations
@@ -41,6 +43,13 @@ _WHIFF_CODES: frozenset[str] = frozenset({
     "missed_bunt",
 })
 
+# Statcast's `zone` column buckets the pitch location into a fixed grid:
+#   zones 1–9  = inside the strike zone (a 3x3 grid)
+#   zones 11–14 = outside the strike zone (four outer quadrants)
+# There is no zone 10. So "out of zone" is simply zone > 10, and this is the
+# same in/out split Baseball Savant's own chase-rate leaderboards use.
+_OOZ_THRESHOLD = 10  # zone strictly greater than this is out of the strike zone
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -74,6 +83,90 @@ def _whiff_rate(group: pd.DataFrame) -> float | None:
     return whiffs / swings
 
 
+def _chase_rate(group: pd.DataFrame) -> float | None:
+    """Out-of-zone swings / out-of-zone pitches for one group (a.k.a. O-Swing%).
+
+    Needs both `zone` (to know which pitches were out of the zone) and
+    `description` (to know which were swung at). Returns None when either
+    column is missing or the pitcher threw nothing out of the zone.
+    """
+    if "zone" not in group.columns or "description" not in group.columns:
+        return None
+
+    out_of_zone = group["zone"] > _OOZ_THRESHOLD
+    n_ooz = out_of_zone.sum()
+    if n_ooz == 0:
+        return None
+
+    # A chase = a swing (any offer) on a pitch that was out of the zone.
+    chases = (out_of_zone & group["description"].isin(_SWING_CODES)).sum()
+    return chases / n_ooz
+
+
+def _in_zone_rate(group: pd.DataFrame) -> float | None:
+    """Share of pitches thrown inside the strike zone (zones 1–9).
+
+    Denominator is pitches with a known zone (Statcast always assigns one when
+    tracking succeeded), so a handful of untracked pitches don't skew the rate.
+    """
+    if "zone" not in group.columns:
+        return None
+
+    zone = group["zone"]
+    n_known = zone.notna().sum()
+    if n_known == 0:
+        return None
+
+    in_zone = zone.between(1, 9).sum()   # inclusive 1..9 = the 3x3 strike grid
+    return in_zone / n_known
+
+
+def _prepare_pitches(
+    df: pd.DataFrame,
+    pitcher: int | str | None,
+) -> pd.DataFrame:
+    """Copy df, optionally filter to one pitcher, and drop null pitch types.
+
+    This is the shared front-end for every metric function: it guarantees a
+    clean, non-mutating frame with only real pitches. Extracting it keeps the
+    pitcher-selection logic in exactly one place, so a fix (like the Int64
+    cast below) applies everywhere at once.
+
+    Raises:
+        KeyError   if a column needed for the requested filter is missing.
+        ValueError if the filter or pitch-type cleaning leaves no rows.
+    """
+    # Never mutate the caller's frame.
+    df = df.copy()
+
+    if pitcher is not None:
+        if isinstance(pitcher, int):
+            if "pitcher" not in df.columns:
+                raise KeyError("Column 'pitcher' not found — cannot filter by id.")
+            # Cast to Int64 (nullable) before comparing: the column often loads
+            # as float64 when any rows have NaN IDs, so int == float never matches.
+            df = df[df["pitcher"].astype("Int64") == pitcher]
+        else:
+            # player_name is "Last, First" in pybaseball pulls.
+            if "player_name" not in df.columns:
+                raise KeyError("Column 'player_name' not found — cannot filter by name.")
+            df = df[df["player_name"] == pitcher]
+
+        if df.empty:
+            raise ValueError(f"No rows found for pitcher={pitcher!r}.")
+
+    # Statcast uses a null pitch_type for automatic balls and a few edge cases.
+    # Exclude them before grouping so they don't pollute totals.
+    if "pitch_type" not in df.columns:
+        raise KeyError("Column 'pitch_type' not found in DataFrame.")
+
+    df = df[df["pitch_type"].notna() & (df["pitch_type"] != "")]
+    if df.empty:
+        raise ValueError("No valid pitch_type rows to summarize.")
+
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -94,7 +187,7 @@ def pitcher_arsenal(
     Returns:
         DataFrame with columns:
             pitch_type, n_pitches, usage, avg_velo, avg_spin,
-            h_break_in, v_break_in, avg_extension, whiff_rate
+            h_break_in, v_break_in, avg_extension, whiff_rate, chase_rate
         Sorted by usage descending (primary pitch first).
         All rates are decimals (0.0–1.0). Movement values are in inches.
 
@@ -102,45 +195,8 @@ def pitcher_arsenal(
         If you pass a pre-filtered frame (e.g., only one game), usage reflects
         that sample — make sure df is a representative population for the pitcher.
     """
-    # Work on a copy so we never mutate the caller's frame. CLAUDE.md:
-    # "code must not assume [columns] exist" — every column access below
-    # checks presence first.
-    df = df.copy()
-
-    # -- 1. Filter to one pitcher if requested ------------------------------
-    if pitcher is not None:
-        if isinstance(pitcher, int):
-            # pitcher_id is the MLB player ID (integer in Statcast schema).
-            if "pitcher" not in df.columns:
-                raise KeyError("Column 'pitcher' not found — cannot filter by id.")
-            # Cast to Int64 (nullable) before comparing: the column often loads
-            # as float64 when any rows have NaN IDs, so int == float never matches.
-            df = df[df["pitcher"].astype("Int64") == pitcher]
-        else:
-            # player_name is "Last, First" in pybaseball pulls.
-            if "player_name" not in df.columns:
-                raise KeyError("Column 'player_name' not found — cannot filter by name.")
-            df = df[df["player_name"] == pitcher]
-
-        if df.empty:
-            raise ValueError(f"No rows found for pitcher={pitcher!r}.")
-
-    # -- 2. Drop rows with no pitch type ------------------------------------
-    # Statcast uses null pitch_type for automatic balls and a handful of
-    # edge cases. Exclude them before grouping so they don't pollute totals.
-    if "pitch_type" not in df.columns:
-        raise KeyError("Column 'pitch_type' not found in DataFrame.")
-
-    df = df[df["pitch_type"].notna() & (df["pitch_type"] != "")]
-
+    df = _prepare_pitches(df, pitcher)
     total_pitches = len(df)
-    if total_pitches == 0:
-        raise ValueError("No valid pitch_type rows to summarize.")
-
-    # -- 3. Build per-pitch-type aggregations -------------------------------
-    # We group once and compute all metrics. The lambda approach is explicit
-    # and readable — each metric is its own named line rather than a hidden
-    # column inside a chained agg().
 
     rows: list[dict] = []
 
@@ -190,20 +246,117 @@ def pitcher_arsenal(
             if "release_extension" in group.columns else None
         )
 
-        # Whiff rate — misses per swing. See _whiff_codes rationale above.
+        # Plate-discipline rates. See helper docstrings for the exact formulas.
         row["whiff_rate"] = _whiff_rate(group)
+        row["chase_rate"] = _chase_rate(group)
 
         rows.append(row)
 
-    # -- 4. Assemble, sort, return ------------------------------------------
     result = pd.DataFrame(rows, columns=[
         "pitch_type", "n_pitches", "usage",
         "avg_velo", "avg_spin",
         "h_break_in", "v_break_in",
-        "avg_extension", "whiff_rate",
+        "avg_extension", "whiff_rate", "chase_rate",
     ])
 
     # Primary pitch first — most-used pitch anchors the top of any report.
     result = result.sort_values("usage", ascending=False).reset_index(drop=True)
 
+    return result
+
+
+def pitcher_location(
+    df: pd.DataFrame,
+    pitcher: int | str | None = None,
+) -> pd.DataFrame:
+    """Per-pitch-type plate location summary.
+
+    Args:
+        df:      Cleaned Statcast DataFrame.
+        pitcher: Optional player_id (int) or player_name (str) filter.
+
+    Returns:
+        DataFrame with columns:
+            pitch_type, avg_plate_x, avg_plate_z, in_zone_rate
+        Sorted by pitch count descending (matches the arsenal ordering).
+
+        plate_x / plate_z are in FEET from the center of the plate, catcher's
+        view: +plate_x is toward the batter's… it depends on batter hand, so we
+        report the raw mean and leave interpretation to the location heatmaps.
+        in_zone_rate is a decimal (0.0–1.0).
+    """
+    df = _prepare_pitches(df, pitcher)
+
+    rows: list[dict] = []
+    for pitch_type, group in df.groupby("pitch_type", sort=False):
+        rows.append({
+            "pitch_type":   pitch_type,
+            "n_pitches":    len(group),  # kept only for sorting; dropped below
+            "avg_plate_x":  _safe_mean(group["plate_x"]) if "plate_x" in group.columns else None,
+            "avg_plate_z":  _safe_mean(group["plate_z"]) if "plate_z" in group.columns else None,
+            "in_zone_rate": _in_zone_rate(group),
+        })
+
+    result = pd.DataFrame(rows, columns=[
+        "pitch_type", "n_pitches", "avg_plate_x", "avg_plate_z", "in_zone_rate",
+    ])
+    # Order by usage so this table lines up row-for-row with pitcher_arsenal.
+    result = result.sort_values("n_pitches", ascending=False).reset_index(drop=True)
+    return result.drop(columns=["n_pitches"])
+
+
+def pitcher_handedness_splits(
+    df: pd.DataFrame,
+    pitcher: int | str | None = None,
+) -> pd.DataFrame:
+    """Per (batter hand, pitch type) usage and outcome rates.
+
+    Shows how the pitcher's plan changes against lefties vs righties — which
+    pitches he leans on, and how they perform, split by the `stand` column
+    (batter handedness, 'L' or 'R').
+
+    Args:
+        df:      Cleaned Statcast DataFrame.
+        pitcher: Optional player_id (int) or player_name (str) filter.
+
+    Returns:
+        DataFrame with columns:
+            stand, pitch_type, usage, avg_velo, whiff_rate, chase_rate
+        `usage` is the pitch's share of pitches thrown *to that batter hand*
+        (so each hand's usages sum to ~1.0). Sorted by hand, then usage desc.
+
+    Raises:
+        KeyError if the `stand` column is absent.
+    """
+    df = _prepare_pitches(df, pitcher)
+
+    if "stand" not in df.columns:
+        raise KeyError("Column 'stand' not found — cannot compute handedness splits.")
+
+    # Drop rows with no batter hand (rare, but keeps the denominators honest).
+    df = df[df["stand"].notna() & (df["stand"] != "")]
+    if df.empty:
+        raise ValueError("No rows with a known batter hand ('stand').")
+
+    # Pitches thrown to each hand — the per-hand usage denominator.
+    hand_totals = df.groupby("stand").size()
+
+    rows: list[dict] = []
+    for (stand, pitch_type), group in df.groupby(["stand", "pitch_type"], sort=False):
+        rows.append({
+            "stand":      stand,
+            "pitch_type": pitch_type,
+            "usage":      len(group) / hand_totals[stand],
+            "avg_velo":   _safe_mean(group["release_speed"]) if "release_speed" in group.columns else None,
+            "whiff_rate": _whiff_rate(group),
+            "chase_rate": _chase_rate(group),
+        })
+
+    result = pd.DataFrame(rows, columns=[
+        "stand", "pitch_type", "usage", "avg_velo", "whiff_rate", "chase_rate",
+    ])
+    # Group each hand together, most-used pitch first within the hand.
+    result = result.sort_values(
+        ["stand", "usage"], ascending=[True, False]
+    ).reset_index(drop=True)
     return result

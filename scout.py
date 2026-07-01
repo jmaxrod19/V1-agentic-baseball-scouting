@@ -31,8 +31,13 @@ from pybaseball import playerid_lookup
 
 import config
 from loaders import load_statcast_csv, pull_statcast
-from metrics import pitcher_arsenal
+from metrics import (
+    pitcher_arsenal,
+    pitcher_handedness_splits,
+    pitcher_location,
+)
 from report import pitcher_report, save_report
+from html_report import pitcher_html_report, save_html_report
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +160,20 @@ def _count_starts(df: pd.DataFrame, pitcher_id: int) -> int:
     return int(df.loc[mask, "game_date"].nunique())
 
 
+def _throws_label(df_pitcher: pd.DataFrame) -> str:
+    """Derive 'Right-handed' / 'Left-handed' from the pitcher's `p_throws`.
+
+    Read from the data rather than hardcoded so any pitcher works. Falls back
+    to a neutral label if the column is missing (older pulls) or empty.
+    """
+    if "p_throws" not in df_pitcher.columns:
+        return "Pitcher"
+    hands = df_pitcher["p_throws"].dropna()
+    if hands.empty:
+        return "Pitcher"
+    return {"R": "Right-handed", "L": "Left-handed"}.get(hands.iloc[0], "Pitcher")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -183,6 +202,11 @@ def main() -> None:
         action="store_true",
         help="Save the report to data/processed/",
     )
+    parser.add_argument(
+        "--html",
+        action="store_true",
+        help="Generate the styled HTML report instead of the text report",
+    )
     args = parser.parse_args()
 
     # 1. Resolve the pitcher name to an MLB ID.
@@ -208,11 +232,30 @@ def main() -> None:
     n_starts = _count_starts(df_all, pitcher_id)
     print(f"Found {n_pitches:,} pitches across {n_starts} appearance(s).")
 
-    # 4. Compute the arsenal metrics.
+    # 4. Compute the arsenal metrics (needed by both report formats).
     arsenal = pitcher_arsenal(df_pitcher)
-
-    # 5. Render the report.
     date_label = _friendly_range(args.start, args.end)
+    slug = _safe_filename(canonical_name)
+
+    if args.html:
+        # HTML path: also needs location + handedness splits, plus the
+        # pitcher's throwing hand for the header.
+        location = pitcher_location(df_pitcher)
+        splits = pitcher_handedness_splits(df_pitcher)
+        html = pitcher_html_report(
+            arsenal,
+            location,
+            splits,
+            pitcher_name=canonical_name,
+            throws=_throws_label(df_pitcher),
+        )
+        # HTML is a file format, not terminal output — always write it, and
+        # tell the user where it landed rather than dumping markup to stdout.
+        out_path = config.PROCESSED_DIR / f"{slug}_report_{args.start}_{args.end}.html"
+        save_html_report(html, out_path)
+        return
+
+    # Text path (default).
     report = pitcher_report(
         arsenal,
         pitcher_name=canonical_name,
@@ -223,9 +266,7 @@ def main() -> None:
     print()
     print(report)
 
-    # 6. Optionally save to disk.
     if args.save:
-        slug = _safe_filename(canonical_name)
         out_path = config.PROCESSED_DIR / f"{slug}_report_{args.start}_{args.end}.txt"
         save_report(report, out_path)
 

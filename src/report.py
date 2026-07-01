@@ -88,8 +88,12 @@ _PITCH_NAMES: dict[str, str] = {
 }
 
 
-def _pitch_label(code: str) -> str:
-    """Return a human-readable pitch name, falling back to the raw code."""
+def pitch_display_name(code: str) -> str:
+    """Return a human-readable pitch name, falling back to the raw code.
+
+    Public because the HTML report layer needs the same mapping — keeping it
+    in one place means a new pitch code is added once, not twice.
+    """
     return _PITCH_NAMES.get(code, code)
 
 
@@ -140,7 +144,7 @@ def _table_header() -> str:
 
 def _table_row(row: pd.Series) -> str:
     w = _COL_WIDTHS
-    label = f"{_pitch_label(row['pitch_type'])} ({row['pitch_type']})"
+    label = f"{pitch_display_name(row['pitch_type'])} ({row['pitch_type']})"
     return (
         f"{label:<{w['pitch']}}"
         f"{_pct(row['usage']):>{w['usage']}}"
