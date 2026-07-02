@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automated Baseball Scouting Reports</title>
+  <style>
+    :root {
+      --bg: #f5f1e8; --panel: #fffdf8; --ink: #1f2a34;
+      --muted: #6b7280; --accent: #8b1e3f; --line: #d7d2c8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif; line-height: 1.6;
+    }
+    .page { max-width: 820px; margin: 0 auto; padding: 48px 24px 64px; }
+    .eyebrow {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    h1 { font-size: 36px; line-height: 1.1; margin: 0 0 12px; }
+    .lede { font-size: 18px; color: var(--muted); margin: 0 0 24px; }
+    .rule { border: none; border-top: 3px solid var(--accent); margin: 0 0 28px; }
+    h2 {
+      font-size: 20px; margin: 32px 0 12px;
+      border-bottom: 1px solid var(--line); padding-bottom: 6px;
+    }
+    a { color: var(--accent); }
+    .btn {
+      display: inline-block; margin: 8px 0 4px; padding: 12px 22px;
+      background: var(--accent); color: #fff; text-decoration: none;
+      border-radius: 8px; font-size: 16px;
+    }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 8px; }
+    code {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 4px; padding: 1px 6px; font-size: 14px;
+    }
+    .shot {
+      width: 100%; height: auto; margin-top: 20px;
+      border: 1px solid var(--line); border-radius: 8px;
+    }
+    .footer { margin-top: 40px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="eyebrow">Portfolio Project</div>
+    <h1>Automated Baseball Scouting Reports</h1>
+    <p class="lede">
+      A reproducible Python pipeline that turns raw Statcast pitch data into
+      polished, front-office-style scouting reports — one command, name in,
+      report out.
+    </p>
+    <hr class="rule">
+
+    <a class="btn" href="reports/chase_burns.html">View a live sample report →</a>
+
+    <h2>What it does</h2>
+    <ul>
+      <li>Pulls pitch-level <strong>Statcast</strong> data for any pitcher and date range.</li>
+      <li>Computes an arsenal summary — usage, velocity, spin, movement, whiff &amp; chase rates — plus plate-location and left/right batter splits.</li>
+      <li>Renders a self-contained HTML report with an auto-written narrative, data tables, and five charts (usage, velocity, movement plot, location heatmaps, handedness splits).</li>
+    </ul>
+
+    <h2>Run it yourself</h2>
+    <p><code>python scout.py "Chase Burns" --html</code></p>
+    <p>
+      Source, setup, and conventions live on
+      <a href="https://github.com/jmaxrod19/V1-agentic-baseball-scouting">GitHub</a>.
+    </p>
+
+    <img class="shot" src="assets/report-screenshot.png"
+         alt="Sample Chase Burns scouting report">
+
+    <div class="footer">
+      Built with Python, pandas, matplotlib, and pybaseball. Data: MLB Statcast.
+    </div>
+  </div>
+</body>
+</html>
