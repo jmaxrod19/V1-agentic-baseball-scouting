@@ -28,10 +28,12 @@
     }
     a { color: var(--accent); }
     .btn {
-      display: inline-block; margin: 8px 0 4px; padding: 12px 22px;
+      display: inline-block; margin: 8px 12px 4px 0; padding: 12px 22px;
       background: var(--accent); color: #fff; text-decoration: none;
       border-radius: 8px; font-size: 16px;
     }
+    .btn.alt { background: var(--panel); color: var(--accent);
+               border: 1px solid var(--accent); }
     ul { padding-left: 20px; }
     li { margin-bottom: 8px; }
     code {
@@ -56,17 +58,23 @@
     </p>
     <hr class="rule">
 
-    <a class="btn" href="reports/chase_burns.html">View a live sample report →</a>
+    <p style="margin:0 0 4px; font-size:13px; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted);">Live sample reports</p>
+    <a class="btn" href="reports/chase_burns.html">Pitcher — Chase Burns →</a>
+    <a class="btn alt" href="reports/ketel_marte.html">Hitter — Ketel Marte →</a>
 
     <h2>What it does</h2>
     <ul>
-      <li>Pulls pitch-level <strong>Statcast</strong> data for any pitcher and date range.</li>
-      <li>Computes an arsenal summary — usage, velocity, spin, movement, whiff &amp; chase rates — plus plate-location and left/right batter splits.</li>
-      <li>Renders a self-contained HTML report with an auto-written narrative, data tables, and five charts (usage, velocity, movement plot, location heatmaps, handedness splits).</li>
+      <li>Pulls pitch-level <strong>Statcast</strong> data for any player and date range.</li>
+      <li><strong>Pitchers:</strong> arsenal summary — usage, velocity, spin, movement, whiff &amp; chase rates — plus plate-location and left/right batter splits, with five charts.</li>
+      <li><strong>Hitters:</strong> batted-ball quality — exit velocity, launch angle, hard-hit%, barrel%, sweet-spot%, and expected stats on contact (xwOBACON/xBACON), split vs LHP/RHP.</li>
+      <li>Renders a self-contained HTML report with an auto-written narrative and data tables — one file, opens offline, prints to PDF.</li>
     </ul>
 
     <h2>Run it yourself</h2>
-    <p><code>python scout.py "Chase Burns" --html</code></p>
+    <p>
+      <code>python scout.py "Chase Burns" --html</code><br>
+      <code>python scout.py "Ketel Marte" --hitter</code>
+    </p>
     <p>
       Source, setup, and conventions live on
       <a href="https://github.com/jmaxrod19/V1-agentic-baseball-scouting">GitHub</a>.

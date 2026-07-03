@@ -11,13 +11,15 @@ charts — in one file.
 
 ## What it does
 
-- Pulls pitch-level Statcast data for any pitcher and date range (via `pybaseball`).
-- Computes an **arsenal summary** — usage, velocity, spin, movement (in inches,
-  arm-side-positive convention), **whiff rate** and **chase rate** per pitch —
-  plus plate-location and left/right batter splits.
+- Pulls pitch-level Statcast data for any player and date range (via `pybaseball`).
+- **Pitchers:** an **arsenal summary** — usage, velocity, spin, movement (in
+  inches, arm-side-positive convention), **whiff** and **chase** rates per pitch
+  — plus plate-location and left/right batter splits, with five charts.
+- **Hitters:** a **batted-ball-quality** profile — exit velocity, launch angle,
+  hard-hit%, barrel%, sweet-spot%, and expected stats on contact
+  (**xwOBACON / xBACON**), split vs LHP/RHP.
 - Renders a self-contained, offline-viewable HTML report: summary cards, an
-  auto-generated narrative, three data tables, and five charts (pitch usage,
-  velocity, movement plot, location heatmaps, handedness splits).
+  auto-generated narrative, and data tables (one file, prints cleanly to PDF).
 
 ## Setup
 
@@ -29,10 +31,13 @@ pip install -r requirements.txt
 ## Generate a report
 
 ```bash
-# Styled HTML report (with charts) -> data/processed/
+# Pitcher HTML report (with charts) -> data/processed/
 python scout.py "Chase Burns" --start 2026-06-01 --end 2026-06-28 --html
 
-# Plain-text report to the terminal
+# Hitter batted-ball-quality report
+python scout.py "Ketel Marte" --start 2026-06-01 --end 2026-06-28 --hitter
+
+# Plain-text pitcher report to the terminal
 python scout.py "Chase Burns" --start 2026-06-01 --end 2026-06-28
 ```
 
