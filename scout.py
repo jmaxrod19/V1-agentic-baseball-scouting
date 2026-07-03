@@ -32,20 +32,22 @@ from pybaseball import playerid_lookup
 import config
 from loaders import load_statcast_csv, pull_statcast
 from metrics import (
+    hitter_batted_ball,
+    hitter_platoon_batted_ball,
     pitcher_arsenal,
     pitcher_handedness_splits,
     pitcher_location,
 )
 from report import pitcher_report, save_report
-from html_report import pitcher_html_report, save_html_report
+from html_report import hitter_html_report, pitcher_html_report, save_html_report
 
 
 # ---------------------------------------------------------------------------
 # Player ID resolution
 # ---------------------------------------------------------------------------
 
-def _resolve_pitcher_id(name: str) -> tuple[int, str]:
-    """Look up a pitcher's MLB ID by name.
+def _resolve_player_id(name: str) -> tuple[int, str]:
+    """Look up a player's MLB ID by name (works for pitchers and hitters).
 
     Args:
         name: Full name as 'First Last' or 'Last, First'.
@@ -174,17 +176,33 @@ def _throws_label(df_pitcher: pd.DataFrame) -> str:
     return {"R": "Right-handed", "L": "Left-handed"}.get(hands.iloc[0], "Pitcher")
 
 
+def _bats_label(df: pd.DataFrame, batter_id: int) -> str:
+    """Derive 'Right-handed' / 'Left-handed' / 'Switch' from a batter's `stand`.
+
+    A switch hitter shows both L and R across his plate appearances, so seeing
+    more than one distinct value means 'Switch'.
+    """
+    if "stand" not in df.columns:
+        return "Hitter"
+    stands = df.loc[df["batter"].astype("Int64") == batter_id, "stand"].dropna().unique()
+    if len(stands) > 1:
+        return "Switch"
+    if len(stands) == 1:
+        return {"R": "Right-handed", "L": "Left-handed"}.get(stands[0], "Hitter")
+    return "Hitter"
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate a pitcher scouting report from Statcast data.",
+        description="Generate a scouting report from Statcast data.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("pitcher", help="Pitcher name, e.g. 'Chase Burns'")
+    parser.add_argument("player", help="Player name, e.g. 'Chase Burns' or 'Ketel Marte'")
     parser.add_argument(
         "--start",
         default=_default_start(),
@@ -207,29 +225,63 @@ def main() -> None:
         action="store_true",
         help="Generate the styled HTML report instead of the text report",
     )
+    parser.add_argument(
+        "--hitter",
+        action="store_true",
+        help="Treat the player as a hitter (batted-ball report) instead of a pitcher",
+    )
     args = parser.parse_args()
 
-    # 1. Resolve the pitcher name to an MLB ID.
-    print(f"Looking up '{args.pitcher}'…")
-    pitcher_id, canonical_name = _resolve_pitcher_id(args.pitcher)
-    print(f"Found: {canonical_name} (MLB ID {pitcher_id})")
+    # 1. Resolve the player name to an MLB ID (works for pitchers and hitters).
+    print(f"Looking up '{args.player}'…")
+    player_id, canonical_name = _resolve_player_id(args.player)
+    print(f"Found: {canonical_name} (MLB ID {player_id})")
 
-    # 2. Load or pull the date-range data.
+    # 2. Load or pull the date-range data (all players in the window).
     df_all = _load_or_pull(canonical_name, args.start, args.end)
 
-    # 3. Filter to just this pitcher's pitches.
-    df_pitcher = df_all[df_all["pitcher"].astype("Int64") == pitcher_id].copy()
+    # -- Hitter path: batted-ball-quality HTML report -----------------------
+    if args.hitter:
+        # Overall profile is required — abort with a clear message if it fails.
+        try:
+            overall = hitter_batted_ball(df_all, batter=player_id)
+        except (KeyError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Found {int(overall.iloc[0]['n_bbe'])} batted balls.")
+
+        # Platoon splits are a bonus — if p_throws is missing, still emit the
+        # overall report rather than failing the whole thing.
+        try:
+            platoon = hitter_platoon_batted_ball(df_all, batter=player_id)
+        except (KeyError, ValueError) as exc:
+            print(f"NOTE: platoon splits unavailable ({exc}).", file=sys.stderr)
+            platoon = None
+
+        html = hitter_html_report(
+            overall, platoon,
+            hitter_name=canonical_name,
+            bats=_bats_label(df_all, player_id),
+        )
+        slug = _safe_filename(canonical_name)
+        out_path = config.PROCESSED_DIR / f"{slug}_hitter_{args.start}_{args.end}.html"
+        save_html_report(html, out_path)
+        return
+
+    # 3. Pitcher path: filter to just this pitcher's pitches.
+    df_pitcher = df_all[df_all["pitcher"].astype("Int64") == player_id].copy()
 
     if df_pitcher.empty:
         print(
-            f"ERROR: No pitches found for {canonical_name} (ID {pitcher_id}) "
-            f"between {args.start} and {args.end}.",
+            f"ERROR: No pitches found for {canonical_name} (ID {player_id}) "
+            f"between {args.start} and {args.end}.\n"
+            f"(If {canonical_name} is a hitter, re-run with --hitter.)",
             file=sys.stderr,
         )
         sys.exit(1)
 
     n_pitches = len(df_pitcher)
-    n_starts = _count_starts(df_all, pitcher_id)
+    n_starts = _count_starts(df_all, player_id)
     print(f"Found {n_pitches:,} pitches across {n_starts} appearance(s).")
 
     # 4. Compute the arsenal metrics (needed by both report formats).
