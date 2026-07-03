@@ -50,6 +50,9 @@ STATCAST_NUMERIC_COLS = [
     "release_extension",
     "launch_speed",
     "launch_angle",
+    # Savant's 1–6 batted-ball classification (6 == Barrel). Categorical, but
+    # coercing to numeric lets us compare `== 6` reliably across pulls.
+    "launch_speed_angle",
     "hit_distance_sc",
     "effective_speed",
     "estimated_ba_using_speedangle",

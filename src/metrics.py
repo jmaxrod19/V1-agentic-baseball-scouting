@@ -8,6 +8,8 @@ Public functions:
     pitcher_arsenal(df, pitcher=None)           -> per-pitch-type summary
     pitcher_location(df, pitcher=None)          -> per-pitch-type plate location
     pitcher_handedness_splits(df, pitcher=None) -> per (batter hand, pitch type)
+    hitter_batted_ball(df, batter=None)         -> overall batted-ball quality
+    hitter_platoon_batted_ball(df, batter=None) -> batted-ball quality vs LHP/RHP
 """
 
 from __future__ import annotations
@@ -49,6 +51,13 @@ _WHIFF_CODES: frozenset[str] = frozenset({
 # There is no zone 10. So "out of zone" is simply zone > 10, and this is the
 # same in/out split Baseball Savant's own chase-rate leaderboards use.
 _OOZ_THRESHOLD = 10  # zone strictly greater than this is out of the strike zone
+
+# Batted-ball quality thresholds (Statcast / Savant conventions, confirmed
+# against MLB.com glossary + Savant CSV docs).
+_BATTED_BALL = "hit_into_play"   # the `description` value marking a ball in play
+_HARD_HIT_MPH = 95.0             # exit velocity >= this = a "hard-hit" ball
+_SWEET_SPOT_LA = (8.0, 32.0)     # launch angle in this range (incl.) = "sweet spot"
+_BARREL_BUCKET = 6               # launch_speed_angle == 6 is Savant's "Barrel" bucket
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +128,109 @@ def _in_zone_rate(group: pd.DataFrame) -> float | None:
 
     in_zone = zone.between(1, 9).sum()   # inclusive 1..9 = the 3x3 strike grid
     return in_zone / n_known
+
+
+# -- Batted-ball rate helpers ------------------------------------------------
+# Each returns (matching batted balls / batted balls with a known value), or
+# None if the column is absent or entirely null. The denominator is per-column
+# so a few untracked balls (null EV/LA) don't distort the rate.
+
+def _rate_ge(series: pd.Series | None, threshold: float) -> float | None:
+    """Share of values >= threshold (e.g. hard-hit: exit velo >= 95)."""
+    if series is None:
+        return None
+    known = series.notna().sum()
+    return (series >= threshold).sum() / known if known else None
+
+
+def _rate_eq(series: pd.Series | None, value: float) -> float | None:
+    """Share of values equal to `value` (e.g. barrel: launch_speed_angle == 6)."""
+    if series is None:
+        return None
+    known = series.notna().sum()
+    return (series == value).sum() / known if known else None
+
+
+def _rate_between(series: pd.Series | None, lo: float, hi: float) -> float | None:
+    """Share of values in [lo, hi] (e.g. sweet-spot: launch angle 8–32)."""
+    if series is None:
+        return None
+    known = series.notna().sum()
+    return series.between(lo, hi).sum() / known if known else None
+
+
+def _prepare_batted_balls(
+    df: pd.DataFrame,
+    batter: int | None,
+) -> pd.DataFrame:
+    """Copy df, optionally filter to one batter, and keep only balls in play.
+
+    The hitter analogue of _prepare_pitches. `batter` is an MLB player id (int):
+    Statcast's `player_name` column holds the *pitcher's* name, so a hitter can
+    only be selected by id, not by name.
+
+    Bunts are excluded when the play-description text (`des`) is available —
+    Statcast exposes no clean bunt flag, and bunts depress exit velocity without
+    reflecting swing quality. When `des` is absent, bunts remain (documented
+    limitation) — for most hitters they're a negligible share of batted balls.
+    """
+    df = df.copy()
+
+    if batter is not None:
+        if "batter" not in df.columns:
+            raise KeyError("Column 'batter' not found — cannot filter by batter id.")
+        df = df[df["batter"].astype("Int64") == batter]
+        if df.empty:
+            raise ValueError(f"No rows found for batter={batter!r}.")
+
+    if "description" not in df.columns:
+        raise KeyError("Column 'description' not found in DataFrame.")
+
+    bbe = df[df["description"] == _BATTED_BALL].copy()
+
+    if "des" in bbe.columns:
+        is_bunt = bbe["des"].str.contains("bunt", case=False, na=False)
+        bbe = bbe[~is_bunt]
+
+    if bbe.empty:
+        raise ValueError("No batted balls (hit_into_play) to summarize.")
+
+    return bbe
+
+
+def _batted_ball_metrics(bbe: pd.DataFrame) -> dict:
+    """Compute the batted-ball-quality metric set for a set of balls in play.
+
+    Rates are decimals (0.0–1.0). xwOBACON/xBACON are rate stats reported on
+    their own scale (~.250–.400), not percentages — the display layer shows
+    them as .XXX, everything else as a percent.
+    """
+    ev = bbe.get("launch_speed")
+    la = bbe.get("launch_angle")
+    lsa = bbe.get("launch_speed_angle")
+
+    return {
+        "n_bbe":           len(bbe),
+        "avg_ev":          _safe_mean(ev) if ev is not None else None,
+        "max_ev":          ev.max() if ev is not None and ev.notna().any() else None,
+        "avg_la":          _safe_mean(la) if la is not None else None,
+        "hard_hit_rate":   _rate_ge(ev, _HARD_HIT_MPH),
+        "barrel_rate":     _rate_eq(lsa, _BARREL_BUCKET),
+        "sweet_spot_rate": _rate_between(la, *_SWEET_SPOT_LA),
+        # xwOBACON / xBACON: mean expected value over balls in play (contact only).
+        "xwobacon": _safe_mean(bbe["estimated_woba_using_speedangle"])
+                    if "estimated_woba_using_speedangle" in bbe.columns else None,
+        "xbacon":   _safe_mean(bbe["estimated_ba_using_speedangle"])
+                    if "estimated_ba_using_speedangle" in bbe.columns else None,
+    }
+
+
+# Column order shared by the overall and platoon batted-ball frames.
+_BATTED_BALL_COLS = [
+    "n_bbe", "avg_ev", "max_ev", "avg_la",
+    "hard_hit_rate", "barrel_rate", "sweet_spot_rate",
+    "xwobacon", "xbacon",
+]
 
 
 def _prepare_pitches(
@@ -369,3 +481,59 @@ def pitcher_handedness_splits(
         ["stand", "usage"], ascending=[True, False]
     ).reset_index(drop=True)
     return result
+
+
+def hitter_batted_ball(
+    df: pd.DataFrame,
+    batter: int | None = None,
+) -> pd.DataFrame:
+    """Overall batted-ball-quality profile for a hitter (one row).
+
+    Args:
+        df:     Cleaned Statcast DataFrame.
+        batter: Optional MLB player id (int). None treats df as one hitter's
+                balls in play. (Name filtering isn't supported — `player_name`
+                is the pitcher, not the batter.)
+
+    Returns:
+        One-row DataFrame with columns:
+            n_bbe, avg_ev, max_ev, avg_la,
+            hard_hit_rate, barrel_rate, sweet_spot_rate, xwobacon, xbacon
+        Rates are decimals (0.0–1.0); xwobacon/xbacon are on the wOBA/BA scale.
+    """
+    bbe = _prepare_batted_balls(df, batter)
+    metrics = _batted_ball_metrics(bbe)
+    return pd.DataFrame([metrics], columns=_BATTED_BALL_COLS)
+
+
+def hitter_platoon_batted_ball(
+    df: pd.DataFrame,
+    batter: int | None = None,
+) -> pd.DataFrame:
+    """Batted-ball quality split by pitcher handedness (vs LHP / vs RHP).
+
+    Same metrics as hitter_batted_ball, one row per pitcher hand (`p_throws`),
+    so you can see whether the hitter squares up lefties or righties better.
+
+    Returns:
+        DataFrame with a leading `vs_hand` column ('L'/'R') plus the batted-ball
+        columns. Sorted by hand ('L' then 'R').
+
+    Raises:
+        KeyError if `p_throws` is absent.
+    """
+    bbe = _prepare_batted_balls(df, batter)
+
+    if "p_throws" not in bbe.columns:
+        raise KeyError("Column 'p_throws' not found — cannot split by pitcher hand.")
+
+    bbe = bbe[bbe["p_throws"].notna() & (bbe["p_throws"] != "")]
+    if bbe.empty:
+        raise ValueError("No batted balls with a known pitcher hand ('p_throws').")
+
+    rows: list[dict] = []
+    for hand, group in bbe.groupby("p_throws", sort=False):
+        rows.append({"vs_hand": hand, **_batted_ball_metrics(group)})
+
+    result = pd.DataFrame(rows, columns=["vs_hand", *_BATTED_BALL_COLS])
+    return result.sort_values("vs_hand").reset_index(drop=True)

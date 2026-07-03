@@ -132,6 +132,17 @@ def _pct(val: float | None, decimals: int = 1) -> str:
     return _fmt(val, decimals, scale=100.0)
 
 
+def _rate3(val: float | None) -> str:
+    """Rate stat (0.385) -> baseball-style '.385' (leading zero dropped).
+
+    Assumes 0 <= val < 10 (true for wOBA/BA-scale stats). Values >= 10 or
+    negative would be mis-formatted by the leading-zero strip.
+    """
+    if val is None or pd.isna(val):
+        return "NaN"
+    return f"{val:.3f}".lstrip("0") or ".000"
+
+
 # ===========================================================================
 # Card + summary computation
 # ===========================================================================
@@ -486,6 +497,196 @@ def pitcher_html_report(
 
     <div class="footer-note">
       Built for browser viewing now and structured to print cleanly to PDF later.
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+
+# ===========================================================================
+# Hitter report — batted-ball quality (reuses the same design + helpers)
+# ===========================================================================
+
+# Barrel-rate tiers for the narrative. Rough league benchmarks: ~8% barrel rate
+# is league-average, ~10%+ is a good power hitter, ~13%+ is elite. These are
+# narrative judgment calls, not Statcast-defined constants — revisit per season.
+_BARREL_GOOD = 0.10
+_BARREL_ELITE = 0.13
+
+
+def _quality_word(rate: float | None, good: float, elite: float) -> str:
+    """Qualitative tier for a rate stat, using rough league benchmarks."""
+    if rate is None or pd.isna(rate):
+        return "unknown"
+    if rate >= elite:
+        return "elite"
+    if rate >= good:
+        return "above-average"
+    return "average-or-below"
+
+
+def _hitter_cards(hitter_name: str, bats: str, row: pd.Series) -> list[tuple[str, str]]:
+    """Six summary cards for a hitter's batted-ball profile."""
+    return [
+        ("Hitter", hitter_name),
+        ("Bats", bats),
+        ("Batted Balls", str(int(row["n_bbe"]))),
+        ("Avg Exit Velo", f"{_fmt(row['avg_ev'], 1)} mph"),
+        ("Hard-Hit %", f"{_pct(row['hard_hit_rate'])}%"),
+        ("Barrel %", f"{_pct(row['barrel_rate'])}%"),
+    ]
+
+
+def _hitter_summary(row: pd.Series, platoon: pd.DataFrame | None) -> list[str]:
+    """Auto-written batted-ball-quality narrative bullets."""
+    bullets = [
+        f"{int(row['n_bbe'])} batted balls tracked — average exit velocity "
+        f"{_fmt(row['avg_ev'], 1)} mph, topping out at {_fmt(row['max_ev'], 1)} mph.",
+        f"Hard-hit rate {_pct(row['hard_hit_rate'])}% and "
+        f"{_pct(row['barrel_rate'])}% barrels — "
+        f"{_quality_word(row['barrel_rate'], _BARREL_GOOD, _BARREL_ELITE)} barrel production.",
+        f"Sweet-spot rate {_pct(row['sweet_spot_rate'])}% at an average "
+        f"{_fmt(row['avg_la'], 1)}° launch angle.",
+        f"Expected production on contact: {_rate3(row['xwobacon'])} xwOBACON, "
+        f"{_rate3(row['xbacon'])} xBACON.",
+    ]
+
+    # Platoon lean: compare xwOBACON vs LHP and vs RHP when both are present.
+    # Skipped entirely if platoon data is missing (older pull without p_throws)
+    # or the hitter only faced one hand.
+    if platoon is not None and not platoon.empty:
+        hands = {r["vs_hand"]: r for _, r in platoon.iterrows()}
+        if "L" in hands and "R" in hands:
+            l, r = hands["L"], hands["R"]
+            if l["xwobacon"] >= r["xwobacon"]:
+                strong, weak, sh, wh = l, r, "LHP", "RHP"
+            else:
+                strong, weak, sh, wh = r, l, "RHP", "LHP"
+            bullets.append(
+                f"Does more damage against {sh} ({_fmt(strong['avg_ev'], 1)} mph EV, "
+                f"{_rate3(strong['xwobacon'])} xwOBACON) than {wh} "
+                f"({_fmt(weak['avg_ev'], 1)} mph, {_rate3(weak['xwobacon'])})."
+            )
+
+    return bullets
+
+
+def _batted_ball_profile_table(row: pd.Series) -> str:
+    """Overall profile as a vertical Metric | Value table (reads better than
+    one very wide row)."""
+    rows = [
+        ("Batted Balls", str(int(row["n_bbe"]))),
+        ("Avg Exit Velo", f"{_fmt(row['avg_ev'], 1)} mph"),
+        ("Max Exit Velo", f"{_fmt(row['max_ev'], 1)} mph"),
+        ("Avg Launch Angle", f"{_fmt(row['avg_la'], 1)}°"),
+        ("Hard-Hit %", f"{_pct(row['hard_hit_rate'])}%"),
+        ("Barrel %", f"{_pct(row['barrel_rate'])}%"),
+        ("Sweet-Spot %", f"{_pct(row['sweet_spot_rate'])}%"),
+        ("xwOBACON", _rate3(row["xwobacon"])),
+        ("xBACON", _rate3(row["xbacon"])),
+    ]
+    disp = pd.DataFrame(rows, columns=["Metric", "Value"])
+    return _table_html(disp)
+
+
+def _platoon_table(platoon: pd.DataFrame) -> str:
+    """Batted-ball quality split by pitcher hand."""
+    label = {"L": "vs LHP", "R": "vs RHP"}
+    disp = pd.DataFrame({
+        "Vs":           platoon["vs_hand"].map(lambda h: label.get(h, h)),
+        "Batted Balls": platoon["n_bbe"].map(lambda v: str(int(v))),
+        "Avg EV":       platoon["avg_ev"].map(lambda v: _fmt(v, 1)),
+        "Max EV":       platoon["max_ev"].map(lambda v: _fmt(v, 1)),
+        "Avg LA":       platoon["avg_la"].map(lambda v: _fmt(v, 1)),
+        "Hard-Hit %":   platoon["hard_hit_rate"].map(lambda v: _pct(v)),
+        "Barrel %":     platoon["barrel_rate"].map(lambda v: _pct(v)),
+        "Sweet-Spot %": platoon["sweet_spot_rate"].map(lambda v: _pct(v)),
+        "xwOBACON":     platoon["xwobacon"].map(_rate3),
+        "xBACON":       platoon["xbacon"].map(_rate3),
+    })
+    return _table_html(disp)
+
+
+def hitter_html_report(
+    overall: pd.DataFrame,
+    platoon: pd.DataFrame | None = None,
+    *,
+    hitter_name: str,
+    bats: str,
+    subtitle: str = "Version 1 HTML report",
+) -> str:
+    """Render a hitter batted-ball-quality report in the shared design.
+
+    Args:
+        overall: metrics.hitter_batted_ball() output (one row).
+        platoon: metrics.hitter_platoon_batted_ball() output. Optional — when
+                 None or empty (e.g. a pull without `p_throws`), the Platoon
+                 Splits section and its summary bullet are omitted.
+        hitter_name: Display name, e.g. 'Ketel Marte'.
+        bats:    Batting-hand phrase, e.g. 'Right-handed' / 'Switch'.
+        subtitle: Small print after the hand in the subhead.
+
+    Returns a complete, self-contained HTML string.
+    """
+    row = overall.iloc[0]
+    cards = _hitter_cards(hitter_name, bats, row)
+    bullets = _hitter_summary(row, platoon)
+
+    cards_html = "\n".join(
+        f'<div class="card"><div class="card-label">{label}</div>'
+        f'<div class="card-value">{value}</div></div>'
+        for label, value in cards
+    )
+    bullets_html = "\n".join(f"<li>{b}</li>" for b in bullets)
+
+    # Platoon section only when we actually have split data.
+    platoon_section = ""
+    if platoon is not None and not platoon.empty:
+        platoon_section = (
+            '<div class="section">\n'
+            '      <h2>Platoon Splits</h2>\n'
+            f'      {_platoon_table(platoon)}\n'
+            '    </div>'
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{hitter_name} Scouting Report</title>
+  <style>{_CSS}</style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="eyebrow">Automated Scouting Report</div>
+      <h1>{hitter_name}</h1>
+      <p class="subhead">{bats} hitter | {subtitle}</p>
+    </div>
+
+    <div class="cards">
+      {cards_html}
+    </div>
+
+    <div class="section">
+      <h2>Written Summary</h2>
+      <ul class="summary-list">
+        {bullets_html}
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Batted-Ball Profile</h2>
+      {_batted_ball_profile_table(row)}
+    </div>
+
+    {platoon_section}
+
+    <div class="footer-note">
+      Batted-ball quality from Statcast. xwOBACON/xBACON are expected values on
+      contact. Bunts excluded where identifiable.
     </div>
   </div>
 </body>

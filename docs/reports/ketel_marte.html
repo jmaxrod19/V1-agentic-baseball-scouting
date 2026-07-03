@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ketel Marte Scouting Report</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --panel: #fffdf8;
+      --ink: #1f2a34;
+      --muted: #6b7280;
+      --accent: #8b1e3f;
+      --line: #d7d2c8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", serif;
+      line-height: 1.5;
+    }
+    .page { max-width: 1100px; margin: 0 auto; padding: 32px 24px 48px; }
+    .header {
+      border-bottom: 3px solid var(--accent);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    h1, h2, h3 { margin: 0 0 12px; }
+    h1 { font-size: 34px; line-height: 1.1; }
+    h2 {
+      margin-top: 28px; font-size: 22px;
+      border-bottom: 1px solid var(--line); padding-bottom: 8px;
+    }
+    h3 { font-size: 16px; }
+    p { margin: 0; }
+    .subhead { color: var(--muted); font-size: 16px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin: 20px 0 12px;
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      padding: 14px; border-radius: 8px;
+    }
+    .card-label {
+      font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 6px;
+    }
+    .card-value { font-size: 18px; font-weight: 700; }
+    .section { margin-top: 24px; }
+    .summary-list { margin: 0; padding-left: 20px; }
+    .summary-list li { margin-bottom: 10px; }
+    .report-table {
+      width: 100%; border-collapse: collapse; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+      font-size: 14px;
+    }
+    .report-table th, .report-table td {
+      padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left;
+    }
+    .report-table th {
+      background: #ece6da; font-size: 12px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .report-table tr:last-child td { border-bottom: none; }
+    .visual-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    .visual-block {
+      background: var(--panel); border: 1px solid var(--line);
+      padding: 14px; border-radius: 8px; page-break-inside: avoid;
+    }
+    .visual-block img {
+      width: 100%; height: auto; display: block;
+      border: 1px solid var(--line); background: white;
+    }
+    .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
+    @media print {
+      body { background: white; }
+      .page { max-width: none; padding: 0; }
+      .card, .report-table, .visual-block { break-inside: avoid; }
+    }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="eyebrow">Automated Scouting Report</div>
+      <h1>Ketel Marte</h1>
+      <p class="subhead">Switch hitter | Version 1 HTML report</p>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="card-label">Hitter</div><div class="card-value">Ketel Marte</div></div>
+<div class="card"><div class="card-label">Bats</div><div class="card-value">Switch</div></div>
+<div class="card"><div class="card-label">Batted Balls</div><div class="card-value">85</div></div>
+<div class="card"><div class="card-label">Avg Exit Velo</div><div class="card-value">93.3 mph</div></div>
+<div class="card"><div class="card-label">Hard-Hit %</div><div class="card-value">52.4%</div></div>
+<div class="card"><div class="card-label">Barrel %</div><div class="card-value">13.4%</div></div>
+    </div>
+
+    <div class="section">
+      <h2>Written Summary</h2>
+      <ul class="summary-list">
+        <li>85 batted balls tracked — average exit velocity 93.3 mph, topping out at 113.0 mph.</li>
+<li>Hard-hit rate 52.4% and 13.4% barrels — elite barrel production.</li>
+<li>Sweet-spot rate 34.1% at an average 17.3° launch angle.</li>
+<li>Expected production on contact: .394 xwOBACON, .331 xBACON.</li>
+<li>Does more damage against LHP (98.4 mph EV, .508 xwOBACON) than RHP (90.8 mph, .338).</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Batted-Ball Profile</h2>
+      <table class="dataframe report-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Metric</th>
+      <th>Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Batted Balls</td>
+      <td>85</td>
+    </tr>
+    <tr>
+      <td>Avg Exit Velo</td>
+      <td>93.3 mph</td>
+    </tr>
+    <tr>
+      <td>Max Exit Velo</td>
+      <td>113.0 mph</td>
+    </tr>
+    <tr>
+      <td>Avg Launch Angle</td>
+      <td>17.3°</td>
+    </tr>
+    <tr>
+      <td>Hard-Hit %</td>
+      <td>52.4%</td>
+    </tr>
+    <tr>
+      <td>Barrel %</td>
+      <td>13.4%</td>
+    </tr>
+    <tr>
+      <td>Sweet-Spot %</td>
+      <td>34.1%</td>
+    </tr>
+    <tr>
+      <td>xwOBACON</td>
+      <td>.394</td>
+    </tr>
+    <tr>
+      <td>xBACON</td>
+      <td>.331</td>
+    </tr>
+  </tbody>
+</table>
+    </div>
+
+    <div class="section">
+      <h2>Platoon Splits</h2>
+      <table class="dataframe report-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>Vs</th>
+      <th>Batted Balls</th>
+      <th>Avg EV</th>
+      <th>Max EV</th>
+      <th>Avg LA</th>
+      <th>Hard-Hit %</th>
+      <th>Barrel %</th>
+      <th>Sweet-Spot %</th>
+      <th>xwOBACON</th>
+      <th>xBACON</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>vs LHP</td>
+      <td>28</td>
+      <td>98.4</td>
+      <td>113.0</td>
+      <td>14.0</td>
+      <td>66.7</td>
+      <td>18.5</td>
+      <td>37.0</td>
+      <td>.508</td>
+      <td>.388</td>
+    </tr>
+    <tr>
+      <td>vs RHP</td>
+      <td>57</td>
+      <td>90.8</td>
+      <td>110.3</td>
+      <td>18.9</td>
+      <td>45.5</td>
+      <td>10.9</td>
+      <td>32.7</td>
+      <td>.338</td>
+      <td>.304</td>
+    </tr>
+  </tbody>
+</table>
+    </div>
+
+    <div class="footer-note">
+      Batted-ball quality from Statcast. xwOBACON/xBACON are expected values on
+      contact. Bunts excluded where identifiable.
+    </div>
+  </div>
+</body>
+</html>
