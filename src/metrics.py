@@ -483,6 +483,19 @@ def pitcher_handedness_splits(
     return result
 
 
+def batted_balls(
+    df: pd.DataFrame,
+    batter: int | None = None,
+) -> pd.DataFrame:
+    """Return a hitter's cleaned balls in play (hit_into_play, bunts removed).
+
+    Public accessor over the same preparation the metric functions use, so the
+    chart layer can plot raw batted balls without re-deriving the filter or
+    touching a private helper.
+    """
+    return _prepare_batted_balls(df, batter)
+
+
 def hitter_batted_ball(
     df: pd.DataFrame,
     batter: int | None = None,

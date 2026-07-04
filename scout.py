@@ -32,6 +32,7 @@ from pybaseball import playerid_lookup
 import config
 from loaders import load_statcast_csv, pull_statcast
 from metrics import (
+    batted_balls,
     hitter_batted_ball,
     hitter_platoon_batted_ball,
     pitcher_arsenal,
@@ -242,8 +243,11 @@ def main() -> None:
 
     # -- Hitter path: batted-ball-quality HTML report -----------------------
     if args.hitter:
-        # Overall profile is required — abort with a clear message if it fails.
+        # Overall profile + raw batted balls are required — both derive from the
+        # same prep, so compute them together under one guard (a raise here means
+        # no usable data, so we abort with a clean message).
         try:
+            bbe = batted_balls(df_all, batter=player_id)
             overall = hitter_batted_ball(df_all, batter=player_id)
         except (KeyError, ValueError) as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
@@ -262,6 +266,7 @@ def main() -> None:
             overall, platoon,
             hitter_name=canonical_name,
             bats=_bats_label(df_all, player_id),
+            batted_balls_df=bbe,
         )
         slug = _safe_filename(canonical_name)
         out_path = config.PROCESSED_DIR / f"{slug}_hitter_{args.start}_{args.end}.html"

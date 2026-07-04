@@ -472,6 +472,29 @@ def _visuals_section(
         _visual_block("Location Heatmaps", charts.location_heatmaps(pitches, arsenal)),
         _visual_block("Handedness Split Usage", charts.handedness_split_bars(splits)),
     ]
+    return _visuals_wrapper(blocks)
+
+
+def _hitter_visuals_section(batted_balls: pd.DataFrame) -> str:
+    """Build the hitter Visuals section (three batted-ball charts).
+
+    charts is imported lazily so a table-only hitter report stays light.
+    """
+    try:
+        from . import charts
+    except ImportError:
+        import charts
+
+    blocks = [
+        _visual_block("Exit Velocity Distribution", charts.ev_distribution(batted_balls)),
+        _visual_block("Launch Angle Distribution", charts.launch_angle_distribution(batted_balls)),
+        _visual_block("Exit Velocity vs Launch Angle", charts.ev_la_scatter(batted_balls)),
+    ]
+    return _visuals_wrapper(blocks)
+
+
+def _visuals_wrapper(blocks: list[str]) -> str:
+    """Wrap rendered visual blocks in the shared Visuals section markup."""
     return (
         '<div class="section">\n'
         '      <h2>Visuals</h2>\n'
@@ -694,6 +717,7 @@ def hitter_html_report(
     *,
     hitter_name: str,
     bats: str,
+    batted_balls_df: pd.DataFrame | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a hitter batted-ball-quality report in the shared design.
@@ -705,6 +729,8 @@ def hitter_html_report(
                  Splits section and its summary bullet are omitted.
         hitter_name: Display name, e.g. 'Ketel Marte'.
         bats:    Batting-hand phrase, e.g. 'Right-handed' / 'Switch'.
+        batted_balls_df: Optional raw balls-in-play (metrics.batted_balls()).
+                 When given, the report includes the Visuals section (three charts).
         subtitle: Small print after the hand in the subhead.
 
     Returns a complete, self-contained HTML string.
@@ -712,6 +738,10 @@ def hitter_html_report(
     row = overall.iloc[0]
     cards = _hitter_cards(hitter_name, bats, row)
     bullets = _hitter_summary(row, platoon)
+
+    visuals_html = ""
+    if batted_balls_df is not None and not batted_balls_df.empty:
+        visuals_html = _hitter_visuals_section(batted_balls_df)
 
     cards_html = "\n".join(
         f'<div class="card"><div class="card-label">{label}</div>'
@@ -763,6 +793,8 @@ def hitter_html_report(
     </div>
 
     {platoon_section}
+
+    {visuals_html}
 
     {_glossary_section(_HITTER_GLOSSARY)}
 
