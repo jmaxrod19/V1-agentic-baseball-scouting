@@ -79,6 +79,13 @@
       width: 100%; height: auto; display: block;
       border: 1px solid var(--line); background: white;
     }
+    .glossary {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 8px; padding: 4px 18px 16px; margin: 0;
+    }
+    .glossary dt { font-weight: 700; margin-top: 14px; }
+    .glossary dd { margin: 3px 0 0; color: var(--muted); }
+    .glossary-src { margin-top: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
     .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
     @media print {
       body { background: white; }
@@ -209,6 +216,20 @@
     </tr>
   </tbody>
 </table>
+    </div>
+
+    <div class="section">
+      <h2>Glossary</h2>
+      <dl class="glossary">
+<dt>Exit Velocity (mph)</dt><dd>The speed of the baseball as it comes off the bat, just after contact.</dd>
+<dt>Launch Angle (°)</dt><dd>The vertical angle at which the ball leaves the bat relative to the ground.</dd>
+<dt>Hard-Hit %</dt><dd>The share of batted balls hit with an exit velocity of 95 mph or higher.</dd>
+<dt>Barrel %</dt><dd>The share of batted balls classified as “barrels” — the exit-velocity/launch-angle combinations that have historically produced at least a .500 batting average and 1.500 slugging percentage.</dd>
+<dt>Sweet-Spot %</dt><dd>The share of batted balls hit with a launch angle between 8 and 32 degrees.</dd>
+<dt>xwOBACON</dt><dd>Expected weighted On-Base Average on Contact — the wOBA a hitter would be expected to earn on his batted balls based on each ball's exit velocity and launch angle, excluding walks and strikeouts.</dd>
+<dt>xBACON</dt><dd>Expected Batting Average on Contact — the batting average expected on batted balls given their exit velocity and launch angle.</dd>
+      </dl>
+      <p class="glossary-src">Definitions: MLB.com Statcast glossary and FanGraphs.</p>
     </div>
 
     <div class="footer-note">

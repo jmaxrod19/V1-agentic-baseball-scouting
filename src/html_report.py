@@ -107,6 +107,13 @@ _CSS = """
       width: 100%; height: auto; display: block;
       border: 1px solid var(--line); background: white;
     }
+    .glossary {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 8px; padding: 4px 18px 16px; margin: 0;
+    }
+    .glossary dt { font-weight: 700; margin-top: 14px; }
+    .glossary dd { margin: 3px 0 0; color: var(--muted); }
+    .glossary-src { margin-top: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
     .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
     @media print {
       body { background: white; }
@@ -360,6 +367,77 @@ def _location_table(location: pd.DataFrame) -> str:
 
 
 # ===========================================================================
+# Glossary — official stat definitions (MLB Statcast glossary / FanGraphs)
+# ===========================================================================
+# Only the stats each report actually shows are listed. Wording follows the
+# authoritative sources so the definitions can be trusted, not paraphrased loosely.
+
+_PITCHER_GLOSSARY: list[tuple[str, str]] = [
+    ("Usage %",
+     "The share of a pitcher's total pitches thrown of a given pitch type."),
+    ("Velocity (mph)",
+     "Average release speed of the pitch, measured as it leaves the pitcher's hand."),
+    ("Horizontal Break (HB, in)",
+     "Average side-to-side movement of the pitch, in inches, shown arm-side-positive: "
+     "a right-hander's arm-side run is positive and glove-side is negative "
+     "(mirrored for left-handers)."),
+    ("Vertical Break (VB, in)",
+     "Average induced vertical break — movement caused by spin relative to a "
+     "hypothetical spinless pitch, with gravity removed. Positive reads as “rise,” "
+     "negative as extra drop."),
+    ("Whiff %",
+     "Swinging strikes divided by total swings — how often a swing misses. "
+     "Distinct from swinging-strike rate, which is per pitch."),
+    ("Chase %",
+     "Swings at pitches outside the strike zone divided by total pitches outside "
+     "the zone. Also called O-Swing%."),
+    ("Avg Plate X / Z",
+     "Average horizontal (X) and vertical (Z) location of the pitch as it crosses "
+     "home plate, in feet from the middle of the plate (catcher's view)."),
+    ("In-Zone %",
+     "The share of pitches located inside the strike zone (Statcast zones 1–9)."),
+]
+
+_HITTER_GLOSSARY: list[tuple[str, str]] = [
+    ("Exit Velocity (mph)",
+     "The speed of the baseball as it comes off the bat, just after contact."),
+    ("Launch Angle (°)",
+     "The vertical angle at which the ball leaves the bat relative to the ground."),
+    ("Hard-Hit %",
+     "The share of batted balls hit with an exit velocity of 95 mph or higher."),
+    ("Barrel %",
+     "The share of batted balls classified as “barrels” — the exit-velocity/"
+     "launch-angle combinations that have historically produced at least a .500 "
+     "batting average and 1.500 slugging percentage."),
+    ("Sweet-Spot %",
+     "The share of batted balls hit with a launch angle between 8 and 32 degrees."),
+    ("xwOBACON",
+     "Expected weighted On-Base Average on Contact — the wOBA a hitter would be "
+     "expected to earn on his batted balls based on each ball's exit velocity and "
+     "launch angle, excluding walks and strikeouts."),
+    ("xBACON",
+     "Expected Batting Average on Contact — the batting average expected on batted "
+     "balls given their exit velocity and launch angle."),
+]
+
+_GLOSSARY_SOURCE = "Definitions: MLB.com Statcast glossary and FanGraphs."
+
+
+def _glossary_section(entries: list[tuple[str, str]]) -> str:
+    """Render a Glossary section from (term, definition) pairs."""
+    items = "\n".join(
+        f"<dt>{term}</dt><dd>{definition}</dd>" for term, definition in entries
+    )
+    return (
+        '<div class="section">\n'
+        '      <h2>Glossary</h2>\n'
+        f'      <dl class="glossary">\n{items}\n      </dl>\n'
+        f'      <p class="glossary-src">{_GLOSSARY_SOURCE}</p>\n'
+        '    </div>'
+    )
+
+
+# ===========================================================================
 # Visuals section (charts)
 # ===========================================================================
 
@@ -494,6 +572,8 @@ def pitcher_html_report(
     </div>
 
     {visuals_html}
+
+    {_glossary_section(_PITCHER_GLOSSARY)}
 
     <div class="footer-note">
       Built for browser viewing now and structured to print cleanly to PDF later.
@@ -683,6 +763,8 @@ def hitter_html_report(
     </div>
 
     {platoon_section}
+
+    {_glossary_section(_HITTER_GLOSSARY)}
 
     <div class="footer-note">
       Batted-ball quality from Statcast. xwOBACON/xBACON are expected values on
