@@ -33,8 +33,10 @@ from scipy.stats import gaussian_kde
 
 try:
     from .report import pitch_display_name
+    from .metrics import _HARD_HIT_MPH, _SWEET_SPOT_LA, _BARREL_BUCKET
 except ImportError:
     from report import pitch_display_name
+    from metrics import _HARD_HIT_MPH, _SWEET_SPOT_LA, _BARREL_BUCKET
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +377,105 @@ def handedness_split_bars(splits: pd.DataFrame) -> str:
         ax.legend(frameon=False)
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="y", color=_GRID, linewidth=0.6)
+        ax.set_axisbelow(True)
+
+        return _fig_to_data_uri(fig)
+
+
+# ---------------------------------------------------------------------------
+# Hitter batted-ball charts
+# ---------------------------------------------------------------------------
+# Reference lines reuse the metric thresholds imported from metrics.py
+# (hard-hit 95 mph, sweet-spot LA 8–32°, barrel = launch_speed_angle == 6) so a
+# chart's reference line can never drift out of sync with the numbers beside it.
+_CRIMSON = "#cc3552"
+_SWEET_SPOT_SHADE = "#2ca02c"
+
+
+def ev_distribution(bbe: pd.DataFrame) -> str:
+    """Histogram of exit velocity, with the 95 mph hard-hit line marked."""
+    _require_rows(bbe, "ev_distribution")
+    # _require_rows only checks row count; the column itself can be all-NaN on
+    # a pull that never tracked exit velocity — guard that too so we fail loudly
+    # instead of embedding a blank histogram.
+    ev = bbe["launch_speed"].dropna()
+    if ev.empty:
+        raise ValueError("ev_distribution: no non-null launch_speed values to plot.")
+
+    with _figure(figsize=(9, 4.2)) as (fig, ax):
+        ax.hist(ev, bins=20, color=_CRIMSON, edgecolor=_INK, linewidth=0.5)
+        ax.axvline(_HARD_HIT_MPH, color=_INK, linestyle="--", linewidth=1.2)
+        # Place the label near the top of the axis so it doesn't collide with bars.
+        ax.text(_HARD_HIT_MPH + 0.5, ax.get_ylim()[1] * 0.92,
+                "95 mph — hard-hit", fontsize=9, va="top")
+
+        ax.set_xlabel("Exit Velocity (mph)")
+        ax.set_ylabel("Batted balls")
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y", color=_GRID, linewidth=0.6)
+        ax.set_axisbelow(True)
+
+        return _fig_to_data_uri(fig)
+
+
+def launch_angle_distribution(bbe: pd.DataFrame) -> str:
+    """Histogram of launch angle, with the 8–32° sweet-spot band shaded."""
+    _require_rows(bbe, "launch_angle_distribution")
+    la = bbe["launch_angle"].dropna()
+    if la.empty:
+        raise ValueError("launch_angle_distribution: no non-null launch_angle values to plot.")
+
+    with _figure(figsize=(9, 4.2)) as (fig, ax):
+        # Shade the sweet-spot band first so bars sit on top of it.
+        ax.axvspan(*_SWEET_SPOT_LA, color=_SWEET_SPOT_SHADE, alpha=0.15,
+                   label="Sweet spot (8–32°)")
+        ax.hist(la, bins=24, color="#1f5f8b", edgecolor=_INK, linewidth=0.5)
+
+        ax.set_xlabel("Launch Angle (°)")
+        ax.set_ylabel("Batted balls")
+        ax.legend(frameon=False, loc="upper right")
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(axis="y", color=_GRID, linewidth=0.6)
+        ax.set_axisbelow(True)
+
+        return _fig_to_data_uri(fig)
+
+
+def ev_la_scatter(bbe: pd.DataFrame) -> str:
+    """Exit velocity vs launch angle, with barrels highlighted.
+
+    Rather than reimplement the barrel region (a curved EV/LA lookup), we color
+    each ball by Savant's own classification (launch_speed_angle == 6). The
+    hard-hit line and sweet-spot band give context for where damage lives.
+    """
+    _require_rows(bbe, "ev_la_scatter")
+    d = bbe.dropna(subset=["launch_speed", "launch_angle"])
+    if d.empty:
+        raise ValueError("ev_la_scatter: no batted balls with both EV and LA to plot.")
+
+    # Barrel flag: only if the classification column is present in this pull.
+    if "launch_speed_angle" in d.columns:
+        is_barrel = d["launch_speed_angle"] == _BARREL_BUCKET
+    else:
+        is_barrel = pd.Series(False, index=d.index)
+
+    with _figure(figsize=(8, 6)) as (fig, ax):
+        ax.axhline(_HARD_HIT_MPH, color=_INK, linestyle="--", linewidth=1.0)
+        ax.axvspan(*_SWEET_SPOT_LA, color=_SWEET_SPOT_SHADE, alpha=0.12)
+
+        non = d[~is_barrel]
+        bar = d[is_barrel]
+        ax.scatter(non["launch_angle"], non["launch_speed"], s=26,
+                   color="#9aa3ab", alpha=0.6, linewidth=0, label="Batted ball")
+        ax.scatter(bar["launch_angle"], bar["launch_speed"], s=40,
+                   color=_CRIMSON, edgecolor=_INK, linewidth=0.5, label="Barrel",
+                   zorder=3)
+
+        ax.set_xlabel("Launch Angle (°)")
+        ax.set_ylabel("Exit Velocity (mph)")
+        ax.legend(frameon=False, loc="lower center", ncol=2)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.grid(color=_GRID, linewidth=0.5)
         ax.set_axisbelow(True)
 
         return _fig_to_data_uri(fig)
