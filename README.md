@@ -5,7 +5,7 @@ polished, front-office-style scouting reports. Type a pitcher's name, get a
 self-contained HTML report — metrics, tables, an auto-written summary, and five
 charts — in one file.
 
-**🔗 [Try the live app](https://baseball-scouting.onrender.com/)** · [Portfolio site & samples](https://jmaxrod19.github.io/V1-agentic-baseball-scouting/)
+**🔗 [Try the live app](https://jmaxrod19-baseball-scouting.hf.space/)** · [Portfolio site & samples](https://jmaxrod19.github.io/V1-agentic-baseball-scouting/)
 
 ![Sample scouting report](docs/assets/report-screenshot.png)
 
