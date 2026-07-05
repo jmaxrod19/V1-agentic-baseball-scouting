@@ -1,0 +1,13 @@
+# Render Blueprint — deploys the scouting-report web app straight from GitHub.
+# In Render: New + -> Blueprint -> pick this repo. Render reads this file,
+# builds, and starts the service; every push to the branch auto-redeploys.
+services:
+  - type: web
+    name: baseball-scouting
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Single worker: report rendering is CPU/network-bound and matplotlib's Agg
+    # backend is happiest without cross-thread contention on the free tier.
+    startCommand: uvicorn webapp:app --host 0.0.0.0 --port $PORT --workers 1
+    autoDeploy: true
