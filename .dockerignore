@@ -1,0 +1,10 @@
+# Keep the image small: exclude local-only and regenerable content.
+.git/
+.claude/
+.venv/
+__pycache__/
+*.pyc
+data/
+docs/
+notebooks/
+examples_quickstart.py
