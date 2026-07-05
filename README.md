@@ -59,6 +59,10 @@ uvicorn webapp:app --reload      # then open http://127.0.0.1:8000
 `render.yaml`, installs deps, and starts the app; every push auto-redeploys. The
 free tier sleeps after ~15 min idle (first request then takes ~30s to wake).
 
+**Container / Hugging Face Spaces:** a `Dockerfile` is included (non-root user,
+listens on `7860`), so the app runs on any container host. For a free Space with
+more memory headroom, create a Docker Space and point it at this repo.
+
 ## Use the pieces directly
 
 ```python
