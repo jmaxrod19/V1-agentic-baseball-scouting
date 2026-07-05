@@ -44,6 +44,21 @@ python scout.py "Chase Burns" --start 2026-06-01 --end 2026-06-28
 Dates default to the current month. Raw pulls are cached in `data/raw/`, so
 re-running the same request skips the network.
 
+## Interactive web app
+
+A small FastAPI app (`webapp.py`) serves a form — enter a player, pick
+pitcher/hitter and a date range, and get the report rendered live. It reuses the
+same pipeline as the CLI (`src/pipeline.py`) but with fast per-player Statcast
+pulls, an in-memory cache, and a date-range cap.
+
+```bash
+uvicorn webapp:app --reload      # then open http://127.0.0.1:8000
+```
+
+**Deploy to Render (free):** New + → Blueprint → pick this repo. Render reads
+`render.yaml`, installs deps, and starts the app; every push auto-redeploys. The
+free tier sleeps after ~15 min idle (first request then takes ~30s to wake).
+
 ## Use the pieces directly
 
 ```python
@@ -60,11 +75,14 @@ inside `src/loaders.py`.
 ## Layout
 
 - `scout.py` — the CLI entry point (name in → report out)
+- `webapp.py` — the interactive FastAPI web app
+- `src/pipeline.py` — shared "name + dates → report" logic (used by CLI + web)
 - `src/config.py` — paths and column constants (single source of truth)
 - `src/loaders.py` — data loaders (Statcast, Savant, FanGraphs)
 - `src/metrics.py` — arsenal, location, and handedness-split metrics
 - `src/report.py` / `src/html_report.py` — text and HTML report formatters
-- `src/charts.py` — the five report charts (matplotlib → embedded PNGs)
+- `src/charts.py` — the report charts (matplotlib → embedded PNGs)
+- `render.yaml` — Render deploy config
 - `docs/` — the GitHub Pages site and sample report
 - `data/raw/` — immutable downloads (gitignored)
 - `data/processed/` — generated reports and cleaned outputs

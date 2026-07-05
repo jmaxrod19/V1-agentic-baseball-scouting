@@ -114,6 +114,54 @@ def load_statcast_csv(path: str | Path) -> pd.DataFrame:
 
 
 # ===========================================================================
+# Per-player Statcast pulls (fast — one player, not the whole league)
+# ===========================================================================
+# pull_statcast() above grabs EVERY pitch thrown league-wide in the range
+# (100k+ rows for a month) and callers filter afterward — fine for building a
+# cached corpus, too heavy for a live web request. These pull just one player's
+# pitches straight from Statcast, so a report is seconds instead of ~20s.
+
+def pull_statcast_pitcher(
+    player_id: int,
+    start_dt: str,
+    end_dt: str,
+) -> pd.DataFrame:
+    """Pull one pitcher's pitch-level Statcast data for a date range.
+
+    Args:
+        player_id: MLB Advanced Media id (key_mlbam) of the pitcher.
+        start_dt:  'YYYY-MM-DD' (inclusive).
+        end_dt:    'YYYY-MM-DD' (inclusive).
+
+    Returns the cleaned DataFrame (already limited to this pitcher).
+    """
+    from pybaseball import statcast_pitcher
+
+    raw = statcast_pitcher(start_dt, end_dt, player_id)
+    return _clean_statcast_like(raw)
+
+
+def pull_statcast_batter(
+    player_id: int,
+    start_dt: str,
+    end_dt: str,
+) -> pd.DataFrame:
+    """Pull one hitter's pitch-level Statcast data for a date range.
+
+    Args:
+        player_id: MLB Advanced Media id (key_mlbam) of the batter.
+        start_dt:  'YYYY-MM-DD' (inclusive).
+        end_dt:    'YYYY-MM-DD' (inclusive).
+
+    Returns the cleaned DataFrame (every pitch seen by this batter).
+    """
+    from pybaseball import statcast_batter
+
+    raw = statcast_batter(start_dt, end_dt, player_id)
+    return _clean_statcast_like(raw)
+
+
+# ===========================================================================
 # Baseball Savant (browser search export)
 # ===========================================================================
 
