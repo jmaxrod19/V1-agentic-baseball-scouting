@@ -1,0 +1,71 @@
+# Deploy the web app to the Hugging Face Space on every merge to main.
+#
+# The Space is a SEPARATE git repo from GitHub, so nothing reaches it unless we
+# push. This job clones the Space, copies the app code in (but NOT the Space's
+# own README, which holds the HF Docker frontmatter that keeps the Space
+# configured), commits, and pushes — which triggers a rebuild on HF.
+#
+# One-time setup: add a Hugging Face WRITE token as a repo secret named HF_TOKEN
+# (Settings -> Secrets and variables -> Actions -> New repository secret).
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]     # every merge to main deploys
+  workflow_dispatch: {}  # ...and a manual "Run workflow" button in the Actions tab
+
+# If two merges land close together, cancel the older in-flight deploy so the
+# Space always ends on the newest code rather than a stale one finishing last.
+concurrency:
+  group: deploy-hf
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      # Confirm these two match your Space. From the app URL
+      # jmaxrod19-baseball-scouting.hf.space, the Space id is owner/name below.
+      HF_USERNAME: jmaxrod19
+      HF_SPACE: jmaxrod19/baseball-scouting
+    steps:
+      - name: Check out the GitHub repo
+        uses: actions/checkout@v4
+
+      - name: Sync code into the Space and push
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Clone the Space's git repo, authenticating with the token as the
+          # password. Keep the token out of logs by not echoing the URL.
+          git clone "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" hf-space
+
+          # Copy the app into the Space. We deliberately do NOT copy:
+          #   README.md   - the Space's README carries its HF Docker frontmatter
+          #   .git        - never overwrite the target repo's history
+          #   heavy/local - data, notebooks, prebuilt sample reports, CI, agent files
+          # No --delete: we only add/update files, so we can't accidentally strip
+          # something the Space needs that isn't tracked here.
+          rsync -a \
+            --exclude='.git' \
+            --exclude='README.md' \
+            --exclude='.github' \
+            --exclude='.claude' \
+            --exclude='data' \
+            --exclude='docs' \
+            --exclude='notebooks' \
+            --exclude='__pycache__' \
+            ./ hf-space/
+
+          cd hf-space
+          git config user.name  "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          # If nothing changed, `commit` exits non-zero; treat that as success so
+          # a no-op deploy doesn't fail the workflow.
+          git commit -m "Deploy from GitHub ${GITHUB_SHA::7}" || {
+            echo "No changes to deploy."; exit 0;
+          }
+          git push
