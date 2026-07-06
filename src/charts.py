@@ -392,8 +392,22 @@ _CRIMSON = "#cc3552"
 _SWEET_SPOT_SHADE = "#2ca02c"
 
 
+_SLATE = "#9aa3ab"  # muted gray-blue for "everything below the threshold"
+
+
 def ev_distribution(bbe: pd.DataFrame) -> str:
-    """Histogram of exit velocity, with the 95 mph hard-hit line marked."""
+    """Histogram of exit velocity, hard-hit balls shaded crimson.
+
+    Upgrades over a plain histogram:
+    - Bars sit on a fixed 5-mph grid, so a given exit velocity always lands in
+      the same bin regardless of who's hitting — two players' charts line up.
+    - Because 95 (the hard-hit cutoff) is itself a multiple of 5, it falls on a
+      bin *edge*: every bar is wholly hard-hit or wholly not, so we can color the
+      hard-hit bars crimson and the rest slate without any bar straddling the line.
+    - A solid line marks the player's mean EV, and a caption states the two
+      numbers the chart is really about (avg EV, hard-hit %) so the picture and
+      the metric table can never disagree.
+    """
     _require_rows(bbe, "ev_distribution")
     # _require_rows only checks row count; the column itself can be all-NaN on
     # a pull that never tracked exit velocity — guard that too so we fail loudly
@@ -402,12 +416,39 @@ def ev_distribution(bbe: pd.DataFrame) -> str:
     if ev.empty:
         raise ValueError("ev_distribution: no non-null launch_speed values to plot.")
 
+    # Snap the range out to the enclosing multiples of 5 so every edge is on the
+    # shared grid (…, 90, 95, 100, …). np.floor/ceil on ev/5 then *5 rounds the
+    # min down and the max up; +5 on the stop makes arange include the top edge.
+    lo = np.floor(ev.min() / 5) * 5
+    hi = np.ceil(ev.max() / 5) * 5
+    edges = np.arange(lo, hi + 5, 5)
+
     with _figure(figsize=(9, 4.2)) as (fig, ax):
-        ax.hist(ev, bins=20, color=_CRIMSON, edgecolor=_INK, linewidth=0.5)
+        # hist returns (counts, edges, patches); we keep the patches to recolor
+        # each bar individually after the fact.
+        _, _, patches = ax.hist(ev, bins=edges, edgecolor=_INK, linewidth=0.5)
+        for patch in patches:
+            # patch.get_x() is the bar's left edge; a bar at >= 95 is hard-hit.
+            hard = patch.get_x() >= _HARD_HIT_MPH
+            patch.set_facecolor(_CRIMSON if hard else _SLATE)
+
         ax.axvline(_HARD_HIT_MPH, color=_INK, linestyle="--", linewidth=1.2)
-        # Place the label near the top of the axis so it doesn't collide with bars.
+        # Label to the RIGHT of the 95 line so it reads into the crimson region.
         ax.text(_HARD_HIT_MPH + 0.5, ax.get_ylim()[1] * 0.92,
-                "95 mph — hard-hit", fontsize=9, va="top")
+                "95 mph — hard-hit", fontsize=9, va="top", ha="left")
+
+        # Mean marker: solid line + a value label sitting to its LEFT (ha="right")
+        # so it can't collide with the hard-hit label to the right of the 95 line.
+        mean_ev = ev.mean()
+        ax.axvline(mean_ev, color=_INK, linestyle="-", linewidth=1.0)
+        ax.text(mean_ev - 0.5, ax.get_ylim()[1] * 0.92,
+                f"Avg {mean_ev:.1f}", fontsize=9, va="top", ha="right")
+
+        # Caption in the upper-left tying the chart to the numbers beside it.
+        hard_hit_pct = (ev >= _HARD_HIT_MPH).mean() * 100
+        ax.text(0.02, 0.97, f"Hard-hit {hard_hit_pct:.0f}%  ·  n={len(ev)}",
+                transform=ax.transAxes, fontsize=9, va="top", ha="left",
+                color=_INK)
 
         ax.set_xlabel("Exit Velocity (mph)")
         ax.set_ylabel("Batted balls")
@@ -419,17 +460,44 @@ def ev_distribution(bbe: pd.DataFrame) -> str:
 
 
 def launch_angle_distribution(bbe: pd.DataFrame) -> str:
-    """Histogram of launch angle, with the 8–32° sweet-spot band shaded."""
+    """Histogram of launch angle, with the 8–32° sweet-spot band shaded.
+
+    Same upgrades as the EV histogram: a fixed 5° bin grid so bars line up across
+    players (and so the batted-ball-type zones below always fall on the same
+    edges), plus a mean-LA marker and a sweet-spot-% caption. Launch angle is
+    strongly bimodal (grounders vs. balls in the air), which fixed edges preserve
+    honestly instead of letting a data-dependent bin count smear the two humps.
+    """
     _require_rows(bbe, "launch_angle_distribution")
     la = bbe["launch_angle"].dropna()
     if la.empty:
         raise ValueError("launch_angle_distribution: no non-null launch_angle values to plot.")
 
+    # 5° grid snapped out to enclosing multiples of 5 (see ev_distribution for the
+    # floor/ceil trick). Launch angle runs roughly -90..90, so this stays compact.
+    lo = np.floor(la.min() / 5) * 5
+    hi = np.ceil(la.max() / 5) * 5
+    edges = np.arange(lo, hi + 5, 5)
+
     with _figure(figsize=(9, 4.2)) as (fig, ax):
         # Shade the sweet-spot band first so bars sit on top of it.
         ax.axvspan(*_SWEET_SPOT_LA, color=_SWEET_SPOT_SHADE, alpha=0.15,
                    label="Sweet spot (8–32°)")
-        ax.hist(la, bins=24, color="#1f5f8b", edgecolor=_INK, linewidth=0.5)
+        ax.hist(la, bins=edges, color="#1f5f8b", edgecolor=_INK, linewidth=0.5)
+
+        # Mean-LA marker so the reader can place the center of mass at a glance.
+        mean_la = la.mean()
+        ax.axvline(mean_la, color=_INK, linestyle="-", linewidth=1.0)
+        # Offset the label to the right of the line so the line doesn't bisect it.
+        ax.text(mean_la + 1.5, ax.get_ylim()[1] * 0.90, f"Avg {mean_la:.1f}°",
+                fontsize=9, va="top", ha="left")
+
+        # Caption: sweet-spot rate is the number this chart is really about.
+        lo_ss, hi_ss = _SWEET_SPOT_LA
+        sweet_pct = ((la >= lo_ss) & (la <= hi_ss)).mean() * 100
+        ax.text(0.02, 0.97, f"Sweet-spot {sweet_pct:.0f}%  ·  n={len(la)}",
+                transform=ax.transAxes, fontsize=9, va="top", ha="left",
+                color=_INK)
 
         ax.set_xlabel("Launch Angle (°)")
         ax.set_ylabel("Batted balls")
