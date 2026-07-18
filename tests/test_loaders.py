@@ -1,19 +1,23 @@
 """Tests for src/loaders.py — the "messy CSV in, clean DataFrame out" layer.
 
-These run fully offline against the tiny sample CSVs committed in data/raw/, so
+These run fully offline against the tiny sample CSVs in tests/fixtures/, so
 they're fast and deterministic (no network, no pybaseball).
 """
+
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
-from src import config, loaders
+from src import loaders
 
-# Paths to the committed samples, built from config so the tests use the same
-# single source of truth for locations that the app does.
-_STATCAST = config.RAW_DIR / "statcast_sample.csv"
-_SAVANT = config.RAW_DIR / "savant_sample.csv"
-_FANGRAPHS = config.RAW_DIR / "fangraphs_sample.csv"
+# Sample CSVs live next to the tests (tests/fixtures/), NOT in data/raw/ — that
+# folder is gitignored, so anything there is absent in CI. Committing the
+# fixtures beside the tests keeps the suite self-contained and reproducible.
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
+_STATCAST = _FIXTURES / "statcast_sample.csv"
+_SAVANT = _FIXTURES / "savant_sample.csv"
+_FANGRAPHS = _FIXTURES / "fangraphs_sample.csv"
 
 
 # ---------------------------------------------------------------------------
