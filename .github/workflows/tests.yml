@@ -1,0 +1,43 @@
+# Run the pytest suite automatically.
+#
+# Fires on every pull request (so a broken test blocks the merge) and on every
+# push to main (so anything that lands is verified too). This is the safety net
+# from Phase 1 made automatic — you no longer have to remember to run `pytest`.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# If you push again to the same branch/PR while a run is still going, cancel the
+# older one — no point finishing a test run on code you've already replaced.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      # Match the Python version the app runs on in the Dockerfile (3.11), so the
+      # tests exercise the same interpreter as production. cache: pip reuses the
+      # downloaded packages between runs to keep the job fast.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # requirements-dev.txt pulls in the app deps (-r requirements.txt) plus
+      # pytest, so this one install covers everything the tests import.
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # pytest.ini points at tests/, so a bare `pytest` finds and runs them.
+      # A non-zero exit here fails the job and marks the PR's check red.
+      - name: Run the test suite
+        run: pytest
