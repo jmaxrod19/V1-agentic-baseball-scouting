@@ -1,0 +1,4 @@
+# Dev-only dependencies — NOT shipped to the Hugging Face Space.
+# Install alongside the app deps with:  pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0
