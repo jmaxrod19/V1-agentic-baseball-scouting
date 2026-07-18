@@ -24,9 +24,10 @@ from datetime import datetime
 import pandas as pd
 
 try:
-    from . import loaders, metrics
+    from . import config, loaders, metrics
     from .html_report import hitter_html_report, pitcher_html_report
 except ImportError:  # direct-script / non-package execution
+    import config
     import loaders
     import metrics
     from html_report import hitter_html_report, pitcher_html_report
@@ -189,6 +190,41 @@ def _cache_put(key: tuple, value: ReportResult) -> None:
     _CACHE[key] = value
 
 
+def _pull_player(player_id: int, start: str, end: str, kind: str) -> pd.DataFrame:
+    """Pull one player's cleaned Statcast frame, caching completed ranges to disk.
+
+    The in-memory _CACHE above only survives while the process runs, so after
+    every restart/redeploy the first request re-hits Statcast. This adds a disk
+    layer under data/processed/: the cache IS the file.
+
+    - Hit: reload + re-clean from CSV — turns a ~seconds network pull into an
+      instant local read, and lets the app build reports fully offline.
+    - Miss: pull from Statcast, then write the cache — but only for a *completed*
+      date range (end before today). A range ending today could still gain more
+      of today's games after we cache it, so persisting it risks serving stale
+      data across restarts; those ranges fall back to the in-memory cache only.
+    """
+    puller = (
+        loaders.pull_statcast_pitcher if kind == "pitcher"
+        else loaders.pull_statcast_batter
+    )
+    # kind is in the filename so a pitcher and hitter pull for the same id/range
+    # never collide (they're different Statcast queries).
+    path = config.PROCESSED_DIR / f"pull_{kind}_{player_id}_{start}_{end}.csv"
+
+    if path.exists():
+        return loaders.load_statcast_csv(path)
+
+    df = puller(player_id, start, end)
+
+    end_date = datetime.strptime(end, "%Y-%m-%d").date()
+    range_is_complete = end_date < datetime.now().date()
+    if range_is_complete and not df.empty:
+        df.to_csv(path, index=False)
+
+    return df
+
+
 def _pitcher_report(df: pd.DataFrame, name: str) -> str:
     """Render the pitcher HTML from a one-pitcher DataFrame."""
     arsenal = metrics.pitcher_arsenal(df)          # df is already one pitcher
@@ -251,8 +287,9 @@ def generate_report(
     if cached is not None:
         return cached
 
+    df = _pull_player(player_id, start, end, kind)
+
     if kind == "pitcher":
-        df = loaders.pull_statcast_pitcher(player_id, start, end)
         if df.empty:
             raise NoData(
                 f"No pitches found for {canonical} between {start} and {end}. "
@@ -261,7 +298,6 @@ def generate_report(
         html = _pitcher_report(df, canonical)
         result = ReportResult(html, canonical, player_id, kind, len(df))
     else:
-        df = loaders.pull_statcast_batter(player_id, start, end)
         if df.empty:
             raise NoData(
                 f"No batted-ball data for {canonical} between {start} and {end}. "
