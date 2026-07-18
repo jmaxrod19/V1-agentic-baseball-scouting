@@ -600,6 +600,7 @@ def pitcher_html_report(
 
     <div class="footer-note">
       Built for browser viewing now and structured to print cleanly to PDF later.
+      <br>Automated Baseball Scouting · v{config.APP_VERSION}
     </div>
   </div>
 </body>
@@ -801,6 +802,7 @@ def hitter_html_report(
     <div class="footer-note">
       Batted-ball quality from Statcast. xwOBACON/xBACON are expected values on
       contact. Bunts excluded where identifiable.
+      <br>Automated Baseball Scouting · v{config.APP_VERSION}
     </div>
   </div>
 </body>

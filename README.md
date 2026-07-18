@@ -7,6 +7,8 @@ charts — in one file.
 
 **🔗 [Try the live app](https://jmaxrod19-baseball-scouting.hf.space/)** · [Portfolio site & samples](https://jmaxrod19.github.io/V1-agentic-baseball-scouting/)
 
+> **Status:** V1 is shipped and deployed (git tag `v1.0`). **V2 is in active development** — hardening the foundation (tests, caching, validation) before layering on league context and an agentic, Claude-written scouting narrative.
+
 ![Sample scouting report](docs/assets/report-screenshot.png)
 
 ## What it does
