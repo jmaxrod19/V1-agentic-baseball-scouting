@@ -9,6 +9,15 @@ you change paths here and nowhere else.
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
+# Project version
+# ---------------------------------------------------------------------------
+# Single source of truth for the app's version string. Surfaced in the report
+# footer, the web app, and the FastAPI docs — change it here and it updates
+# everywhere. "-dev" marks work-in-progress between tagged releases (V1 shipped
+# as git tag v1.0; V2 is in active development).
+APP_VERSION = "2.0.0-dev"
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 # PROJECT_ROOT resolves to the repo root regardless of where a script is run

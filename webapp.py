@@ -25,10 +25,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse
 
+import config
 import pipeline
 from pipeline import ReportError
 
-app = FastAPI(title="Automated Baseball Scouting Reports")
+# Version comes from config.py (single source of truth), so the page footer and
+# the FastAPI /docs metadata always agree with the report footer.
+_VERSION = config.APP_VERSION
+
+app = FastAPI(title="Automated Baseball Scouting Reports", version=_VERSION)
 
 # Largest span we'll pull in one request. Keeps a live request from asking
 # Statcast for something enormous (and slow). One year covers a full season.
@@ -130,7 +135,7 @@ def _form_body(start: str, end: str) -> str:
         <button class=btn type=submit>Generate report</button>
         <p class=note>Live data comes from MLB Statcast; the first request for a
            player may take a few seconds. Source on
-           <a href="{_REPO_URL}">GitHub</a>.</p>
+           <a href="{_REPO_URL}">GitHub</a>. · v{_VERSION}</p>
       </form>
     """
 
