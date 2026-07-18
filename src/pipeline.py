@@ -18,18 +18,20 @@ Public API:
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 
 import pandas as pd
 
 try:
-    from . import config, loaders, metrics
+    from . import config, loaders, metrics, validate
     from .html_report import hitter_html_report, pitcher_html_report
 except ImportError:  # direct-script / non-package execution
     import config
     import loaders
     import metrics
+    import validate
     from html_report import hitter_html_report, pitcher_html_report
 
 
@@ -51,6 +53,10 @@ class AmbiguousPlayer(ReportError):
 
 class NoData(ReportError):
     """The player resolved, but there's no usable data in the range."""
+
+
+class DataQualityError(ReportError):
+    """The pulled data is present but structurally broken (failed validation)."""
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +219,14 @@ def _pull_player(player_id: int, start: str, end: str, kind: str) -> pd.DataFram
     path = config.PROCESSED_DIR / f"pull_{kind}_{player_id}_{start}_{end}.csv"
 
     if path.exists():
-        return loaders.load_statcast_csv(path)
+        df = loaders.load_statcast_csv(path)
+        _validate_or_raise(df, player_id)  # trust-but-verify even cached data
+        return df
 
     df = puller(player_id, start, end)
+
+    # Validate BEFORE writing the cache, so a broken pull is never persisted.
+    _validate_or_raise(df, player_id)
 
     end_date = datetime.strptime(end, "%Y-%m-%d").date()
     range_is_complete = end_date < datetime.now().date()
@@ -223,6 +234,27 @@ def _pull_player(player_id: int, start: str, end: str, kind: str) -> pd.DataFram
         df.to_csv(path, index=False)
 
     return df
+
+
+def _validate_or_raise(df: pd.DataFrame, player_id: int) -> None:
+    """Validate a pulled frame: log any issues, raise on structural errors.
+
+    An empty frame is left for generate_report's per-kind NoData messages (they
+    explain the pitcher/hitter mixup), so we only validate frames with rows.
+    Warnings are logged to stderr for observability (visible in the HF logs);
+    only error-level issues stop the request, via DataQualityError.
+    """
+    if df.empty:
+        return
+
+    report = validate.validate_statcast(df)
+    if report.issues:
+        # One line to stderr so data-quality problems are diagnosable in the logs.
+        print(f"[validate] player {player_id}: {report.summary()}", file=sys.stderr)
+    if not report.ok:
+        raise DataQualityError(
+            f"Pulled data for player {player_id} failed validation: {report.summary()}"
+        )
 
 
 def _pitcher_report(df: pd.DataFrame, name: str) -> str:
