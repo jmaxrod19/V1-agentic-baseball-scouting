@@ -25,12 +25,13 @@ from datetime import datetime
 import pandas as pd
 
 try:
-    from . import config, loaders, metrics, percentiles, validate
+    from . import config, loaders, metrics, narrative, percentiles, validate
     from .html_report import hitter_html_report, pitcher_html_report
 except ImportError:  # direct-script / non-package execution
     import config
     import loaders
     import metrics
+    import narrative
     import percentiles
     import validate
     from html_report import hitter_html_report, pitcher_html_report
@@ -258,12 +259,28 @@ def _validate_or_raise(df: pd.DataFrame, player_id: int) -> None:
         )
 
 
-def _pitcher_report(df: pd.DataFrame, name: str, player_id: int, season: int) -> str:
-    """Render the pitcher HTML from a one-pitcher DataFrame.
+def _narrative_paragraph(kind, player_id, start, end, gen_fn):
+    """Return the Claude scouting paragraph for a report, cached to disk.
 
-    `player_id` + `season` drive the league percentile lookup (Savant's pitcher
-    percentile card).
+    The paragraph is a paid API call, so we cache it like the player pull:
+    completed ranges are written to data/processed/ (billed once per player+range,
+    even across restarts); a range ending today isn't cached (its data can change).
+    gen_fn (the actual API call) runs only on a cache miss.
     """
+    path = config.PROCESSED_DIR / f"narrative_{kind}_{player_id}_{start}_{end}.txt"
+    if path.exists():
+        return path.read_text() or None
+
+    paragraph = gen_fn()
+    range_is_complete = datetime.strptime(end, "%Y-%m-%d").date() < datetime.now().date()
+    if paragraph and range_is_complete:
+        path.write_text(paragraph)
+    return paragraph
+
+
+def _pitcher_report(df, name, player_id, start, end) -> str:
+    """Render the pitcher HTML from a one-pitcher DataFrame."""
+    season = datetime.strptime(end, "%Y-%m-%d").year
     arsenal = metrics.pitcher_arsenal(df)          # df is already one pitcher
     location = metrics.pitcher_location(df)
     splits = metrics.pitcher_handedness_splits(df)
@@ -275,6 +292,12 @@ def _pitcher_report(df: pd.DataFrame, name: str, player_id: int, season: int) ->
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
 
+    narr = _build_narrative(
+        "pitcher", pctiles, player_id, start, end,
+        name=name, hand=throws_label(df),
+        sample=f"{len(df)} pitches, {friendly_range(start, end)}",
+    )
+
     return pitcher_html_report(
         arsenal, location, splits,
         pitcher_name=name,
@@ -282,17 +305,16 @@ def _pitcher_report(df: pd.DataFrame, name: str, player_id: int, season: int) ->
         pitches=df,                                # enables the Visuals charts
         percentiles=pctiles,
         percentile_season=season,
+        narrative=narr,
     )
 
 
-def _hitter_report(df: pd.DataFrame, name: str, season: int) -> tuple[str, int]:
-    """Render the hitter HTML from a one-batter DataFrame; return (html, n_bbe).
-
-    `season` selects which league leaderboard to rank the hitter against for the
-    percentile section.
-    """
+def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
+    """Render the hitter HTML from a one-batter DataFrame; return (html, n_bbe)."""
+    season = datetime.strptime(end, "%Y-%m-%d").year
     bbe = metrics.batted_balls(df)
     overall = metrics.hitter_batted_ball(df)
+    row = overall.iloc[0]
     # Platoon splits are a bonus — degrade gracefully if p_throws is missing.
     try:
         platoon = metrics.hitter_platoon_batted_ball(df)
@@ -303,9 +325,16 @@ def _hitter_report(df: pd.DataFrame, name: str, season: int) -> tuple[str, int]:
     # off-season) must not sink the whole report — it just renders without them.
     pctiles = None
     try:
-        pctiles = percentiles.hitter_percentiles(overall.iloc[0], season)
+        pctiles = percentiles.hitter_percentiles(row, season)
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
+
+    narr = _build_narrative(
+        "hitter", pctiles, player_id, start, end,
+        name=name, hand=bats_label(df),
+        sample=f"{int(row['n_bbe'])} batted balls, {friendly_range(start, end)}",
+        profile=row,
+    )
 
     html = hitter_html_report(
         overall, platoon,
@@ -314,8 +343,27 @@ def _hitter_report(df: pd.DataFrame, name: str, season: int) -> tuple[str, int]:
         batted_balls_df=bbe,
         percentiles=pctiles,
         percentile_season=season,
+        narrative=narr,
     )
-    return html, int(overall.iloc[0]["n_bbe"])
+    return html, int(row["n_bbe"])
+
+
+def _build_narrative(kind, pctiles, player_id, start, end, *, name, hand, sample, profile=None):
+    """Assemble the narrative block: the deterministic grade line + the cached,
+    best-effort Claude paragraph. Returns None when there are no percentiles."""
+    if not pctiles:
+        return None
+    gl = narrative.grade_line(kind, pctiles)
+    if not gl:  # no gradeable metrics -> no scouting-summary block
+        return None
+    paragraph = _narrative_paragraph(
+        kind, player_id, start, end,
+        lambda: narrative.generate_paragraph(
+            kind, name=name, hand=hand, sample=sample,
+            percentiles=pctiles, profile=profile,
+        ),
+    )
+    return {"grade_line": gl, "paragraph": paragraph}
 
 
 def generate_report(
@@ -357,8 +405,7 @@ def generate_report(
                 f"No pitches found for {canonical} between {start} and {end}. "
                 f"If {canonical} is a hitter, choose Hitter."
             )
-        season = datetime.strptime(end, "%Y-%m-%d").year
-        html = _pitcher_report(df, canonical, player_id, season)
+        html = _pitcher_report(df, canonical, player_id, start, end)
         result = ReportResult(html, canonical, player_id, kind, len(df))
     else:
         if df.empty:
@@ -366,10 +413,8 @@ def generate_report(
                 f"No batted-ball data for {canonical} between {start} and {end}. "
                 f"If {canonical} is a pitcher, choose Pitcher."
             )
-        # Rank against the league season the range ends in.
-        season = datetime.strptime(end, "%Y-%m-%d").year
         try:
-            html, n_bbe = _hitter_report(df, canonical, season)
+            html, n_bbe = _hitter_report(df, canonical, player_id, start, end)
         except (KeyError, ValueError) as exc:
             # e.g. the player has pitches in range but zero balls in play.
             raise NoData(
