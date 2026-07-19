@@ -76,6 +76,67 @@ def test_missing_metric_value_yields_none(monkeypatch, tmp_path):
     assert pct["avg_ev"] is None
 
 
+# ---------------------------------------------------------------------------
+# pitcher_percentiles() — reads Savant's pre-computed ranks, matched by id
+# ---------------------------------------------------------------------------
+
+def _fake_pitcher_ranks() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "player_id": [111, 222],
+            "fb_velocity": [80, 40],
+            "fb_spin": [60, 30],
+            "whiff_percent": [90, 20],
+            "chase_percent": [70, 25],
+            "k_percent": [85, 15],
+            "bb_percent": [50, float("nan")],  # a missing value -> None
+            "hard_hit_percent": [65, 35],
+            "brl_percent": [75, 10],
+            "xera": [88, 22],
+            "xwoba": [80, 18],
+        }
+    )
+
+
+def test_pitcher_percentiles_maps_by_player_id(monkeypatch, tmp_path):
+    monkeypatch.setattr(percentiles.config, "PROCESSED_DIR", tmp_path)
+    monkeypatch.setattr(loaders, "pull_pitcher_percentile_ranks", lambda *a, **k: _fake_pitcher_ranks())
+
+    pct = percentiles.pitcher_percentiles(111, 2024)
+    assert pct["fb_velocity"] == 80
+    assert pct["whiff"] == 90     # from whiff_percent column
+    assert pct["xera"] == 88
+    assert pct["bb"] == 50
+
+
+def test_pitcher_percentiles_missing_value_is_none(monkeypatch, tmp_path):
+    monkeypatch.setattr(percentiles.config, "PROCESSED_DIR", tmp_path)
+    monkeypatch.setattr(loaders, "pull_pitcher_percentile_ranks", lambda *a, **k: _fake_pitcher_ranks())
+    # Player 222 has a NaN bb_percent -> None (so the bar is simply skipped).
+    assert percentiles.pitcher_percentiles(222, 2024)["bb"] is None
+
+
+def test_pitcher_percentiles_unknown_player_is_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(percentiles.config, "PROCESSED_DIR", tmp_path)
+    monkeypatch.setattr(loaders, "pull_pitcher_percentile_ranks", lambda *a, **k: _fake_pitcher_ranks())
+    assert percentiles.pitcher_percentiles(999, 2024) == {}
+
+
+def test_pitcher_baseline_is_cached(monkeypatch, tmp_path):
+    monkeypatch.setattr(percentiles.config, "PROCESSED_DIR", tmp_path)
+    calls = {"n": 0}
+
+    def counting_pull(*a, **k):
+        calls["n"] += 1
+        return _fake_pitcher_ranks()
+
+    monkeypatch.setattr(loaders, "pull_pitcher_percentile_ranks", counting_pull)
+    percentiles.load_pitcher_percentile_baseline(2024)
+    percentiles.load_pitcher_percentile_baseline(2024)
+    assert calls["n"] == 1
+    assert (tmp_path / "league_pitcher_pctile_2024.csv").exists()
+
+
 def test_baseline_is_cached_after_first_pull(monkeypatch, tmp_path):
     monkeypatch.setattr(percentiles.config, "PROCESSED_DIR", tmp_path)
     calls = {"n": 0}

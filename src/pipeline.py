@@ -258,16 +258,30 @@ def _validate_or_raise(df: pd.DataFrame, player_id: int) -> None:
         )
 
 
-def _pitcher_report(df: pd.DataFrame, name: str) -> str:
-    """Render the pitcher HTML from a one-pitcher DataFrame."""
+def _pitcher_report(df: pd.DataFrame, name: str, player_id: int, season: int) -> str:
+    """Render the pitcher HTML from a one-pitcher DataFrame.
+
+    `player_id` + `season` drive the league percentile lookup (Savant's pitcher
+    percentile card).
+    """
     arsenal = metrics.pitcher_arsenal(df)          # df is already one pitcher
     location = metrics.pitcher_location(df)
     splits = metrics.pitcher_handedness_splits(df)
+
+    # Best-effort percentiles: a lookup failure must not sink the report.
+    pctiles = None
+    try:
+        pctiles = percentiles.pitcher_percentiles(player_id, season) or None
+    except Exception as exc:  # noqa: BLE001 — percentiles are optional context
+        print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
+
     return pitcher_html_report(
         arsenal, location, splits,
         pitcher_name=name,
         throws=throws_label(df),
         pitches=df,                                # enables the Visuals charts
+        percentiles=pctiles,
+        percentile_season=season,
     )
 
 
@@ -343,7 +357,8 @@ def generate_report(
                 f"No pitches found for {canonical} between {start} and {end}. "
                 f"If {canonical} is a hitter, choose Hitter."
             )
-        html = _pitcher_report(df, canonical)
+        season = datetime.strptime(end, "%Y-%m-%d").year
+        html = _pitcher_report(df, canonical, player_id, season)
         result = ReportResult(html, canonical, player_id, kind, len(df))
     else:
         if df.empty:

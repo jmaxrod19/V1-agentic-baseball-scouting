@@ -189,19 +189,38 @@ def _pctile_color(p: int) -> str:
 
 
 # Which metrics get a percentile bar, and their display labels. Order = top-down.
-_PCTILE_BAR_METRICS = [
+# One list per report kind; both feed the same _percentile_bars renderer.
+_HITTER_PCTILE_METRICS = [
     ("avg_ev", "Avg Exit Velo"),
     ("max_ev", "Max Exit Velo"),
     ("hard_hit_rate", "Hard-Hit %"),
     ("barrel_rate", "Barrel %"),
     ("sweet_spot_rate", "Sweet-Spot %"),
 ]
+_PITCHER_PCTILE_METRICS = [
+    ("fb_velocity", "Fastball Velo"),
+    ("fb_spin", "Fastball Spin"),
+    ("whiff", "Whiff %"),
+    ("chase", "Chase %"),
+    ("k", "Strikeout %"),
+    ("bb", "Walk %"),
+    ("hard_hit", "Hard-Hit %"),
+    ("barrel", "Barrel %"),
+    ("xera", "xERA"),
+    ("xwoba", "xwOBA"),
+]
 
 
-def _percentile_bars(pctiles: dict, season: int | None) -> str:
-    """Render the Savant-style percentile-bar section, or '' if nothing to show."""
+def _percentile_bars(pctiles: dict, metric_labels: list[tuple[str, str]], caption: str) -> str:
+    """Render the Savant-style percentile-bar section, or '' if nothing to show.
+
+    Args:
+        pctiles:       {metric key: percentile 0-100}. Missing/None keys are skipped.
+        metric_labels: (key, display label) pairs in the order to draw them.
+        caption:       small print under the heading (names the reference group).
+    """
     rows = []
-    for key, label in _PCTILE_BAR_METRICS:
+    for key, label in metric_labels:
         p = pctiles.get(key)
         if p is None:
             continue
@@ -216,12 +235,10 @@ def _percentile_bars(pctiles: dict, season: int | None) -> str:
         )
     if not rows:
         return ""
-    ref = f"{season} qualified hitters" if season else "qualified hitters"
     return (
         '<div class="section">\n'
         '      <h2>League Percentile Rankings</h2>\n'
-        f'      <p class="pctile-caption">Percentile vs {ref} '
-        '(0 = worst, 100 = best).</p>\n'
+        f'      <p class="pctile-caption">{caption}</p>\n'
         f'      {"".join(rows)}\n'
         '    </div>'
     )
@@ -593,6 +610,8 @@ def pitcher_html_report(
     pitcher_name: str,
     throws: str,
     pitches: pd.DataFrame | None = None,
+    percentiles: dict | None = None,
+    percentile_season: int | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a full HTML scouting-report document.
@@ -616,6 +635,16 @@ def pitcher_html_report(
     """
     cards = _build_cards(pitcher_name, throws, arsenal)
     bullets = _build_summary(arsenal, location, splits)
+
+    # Savant-style percentile bars (player-level), empty when not supplied.
+    _p_ref = f"{percentile_season} qualified pitchers" if percentile_season else "qualified pitchers"
+    pctile_bars_section = (
+        _percentile_bars(
+            percentiles, _PITCHER_PCTILE_METRICS,
+            f"Percentile vs {_p_ref} (0 = worst, 100 = best).",
+        )
+        if percentiles else ""
+    )
 
     # Charts are optional: only rendered when raw pitch data is supplied.
     visuals_html = ""
@@ -660,6 +689,8 @@ def pitcher_html_report(
       <h2>Pitch Metrics</h2>
       {_arsenal_table(arsenal)}
     </div>
+
+    {pctile_bars_section}
 
     <div class="section">
       <h2>Handedness Splits</h2>
@@ -835,8 +866,13 @@ def hitter_html_report(
 
     # League percentile section (both a table column and the Savant-style bars).
     # Empty string when no percentiles were supplied, so the layout is unchanged.
+    _hitter_ref = f"{percentile_season} qualified hitters" if percentile_season else "qualified hitters"
     pctile_bars_section = (
-        _percentile_bars(percentiles, percentile_season) if percentiles else ""
+        _percentile_bars(
+            percentiles, _HITTER_PCTILE_METRICS,
+            f"Percentile vs {_hitter_ref} (0 = worst, 100 = best).",
+        )
+        if percentiles else ""
     )
 
     visuals_html = ""
