@@ -115,10 +115,26 @@ _CSS = """
     .glossary dd { margin: 3px 0 0; color: var(--muted); }
     .glossary-src { margin-top: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
     .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
+    .pctile-caption { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+    .pctile-row { display: flex; align-items: center; margin: 12px 0; }
+    .pctile-name { width: 150px; font-size: 14px; flex-shrink: 0; }
+    .pctile-track {
+      position: relative; flex: 1; height: 8px;
+      background: var(--line); border-radius: 4px;
+    }
+    .pctile-fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 4px; }
+    .pctile-badge {
+      position: absolute; top: 50%; transform: translate(-50%, -50%);
+      min-width: 26px; height: 26px; padding: 0 4px; border-radius: 13px;
+      color: white; font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 2px var(--panel);
+    }
     @media print {
       body { background: white; }
       .page { max-width: none; padding: 0; }
-      .card, .report-table, .visual-block { break-inside: avoid; }
+      .card, .report-table, .visual-block, .pctile-row { break-inside: avoid; }
+      .pctile-fill, .pctile-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     }
 """
 
@@ -148,6 +164,67 @@ def _rate3(val: float | None) -> str:
     if val is None or pd.isna(val):
         return "NaN"
     return f"{val:.3f}".lstrip("0") or ".000"
+
+
+def _ordinal(n: int) -> str:
+    """Integer -> ordinal string: 63 -> '63rd', 11 -> '11th', 1 -> '1st'."""
+    n = int(n)
+    # The teens (11th-13th) are all 'th' regardless of last digit.
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _pctile_color(p: int) -> str:
+    """Percentile -> Savant-style color: blue (low) → gray (mid) → red (high)."""
+    blue, gray, red = (54, 97, 173), (176, 176, 176), (210, 45, 73)
+    if p <= 50:
+        lo, hi, t = blue, gray, p / 50
+    else:
+        lo, hi, t = gray, red, (p - 50) / 50
+    rgb = tuple(round(lo[i] + (hi[i] - lo[i]) * t) for i in range(3))
+    return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+# Which metrics get a percentile bar, and their display labels. Order = top-down.
+_PCTILE_BAR_METRICS = [
+    ("avg_ev", "Avg Exit Velo"),
+    ("max_ev", "Max Exit Velo"),
+    ("hard_hit_rate", "Hard-Hit %"),
+    ("barrel_rate", "Barrel %"),
+    ("sweet_spot_rate", "Sweet-Spot %"),
+]
+
+
+def _percentile_bars(pctiles: dict, season: int | None) -> str:
+    """Render the Savant-style percentile-bar section, or '' if nothing to show."""
+    rows = []
+    for key, label in _PCTILE_BAR_METRICS:
+        p = pctiles.get(key)
+        if p is None:
+            continue
+        color = _pctile_color(p)
+        rows.append(
+            f'<div class="pctile-row">'
+            f'<div class="pctile-name">{label}</div>'
+            f'<div class="pctile-track">'
+            f'<div class="pctile-fill" style="width:{p}%;background:{color};"></div>'
+            f'<div class="pctile-badge" style="left:{p}%;background:{color};">{p}</div>'
+            f'</div></div>'
+        )
+    if not rows:
+        return ""
+    ref = f"{season} qualified hitters" if season else "qualified hitters"
+    return (
+        '<div class="section">\n'
+        '      <h2>League Percentile Rankings</h2>\n'
+        f'      <p class="pctile-caption">Percentile vs {ref} '
+        '(0 = worst, 100 = best).</p>\n'
+        f'      {"".join(rows)}\n'
+        '    </div>'
+    )
 
 
 # ===========================================================================
@@ -676,21 +753,35 @@ def _hitter_summary(row: pd.Series, platoon: pd.DataFrame | None) -> list[str]:
     return bullets
 
 
-def _batted_ball_profile_table(row: pd.Series) -> str:
+def _batted_ball_profile_table(row: pd.Series, pctiles: dict | None = None) -> str:
     """Overall profile as a vertical Metric | Value table (reads better than
-    one very wide row)."""
+    one very wide row). When percentiles are supplied, a Pctile column is added
+    for the metrics that have a league ranking."""
+    pctiles = pctiles or {}
+
+    def pcol(key: str) -> str:
+        p = pctiles.get(key)
+        return _ordinal(p) if p is not None else ""
+
+    # (metric label, value, percentile-key or None)
     rows = [
-        ("Batted Balls", str(int(row["n_bbe"]))),
-        ("Avg Exit Velo", f"{_fmt(row['avg_ev'], 1)} mph"),
-        ("Max Exit Velo", f"{_fmt(row['max_ev'], 1)} mph"),
-        ("Avg Launch Angle", f"{_fmt(row['avg_la'], 1)}°"),
-        ("Hard-Hit %", f"{_pct(row['hard_hit_rate'])}%"),
-        ("Barrel %", f"{_pct(row['barrel_rate'])}%"),
-        ("Sweet-Spot %", f"{_pct(row['sweet_spot_rate'])}%"),
-        ("xwOBACON", _rate3(row["xwobacon"])),
-        ("xBACON", _rate3(row["xbacon"])),
+        ("Batted Balls", str(int(row["n_bbe"])), None),
+        ("Avg Exit Velo", f"{_fmt(row['avg_ev'], 1)} mph", "avg_ev"),
+        ("Max Exit Velo", f"{_fmt(row['max_ev'], 1)} mph", "max_ev"),
+        ("Avg Launch Angle", f"{_fmt(row['avg_la'], 1)}°", None),
+        ("Hard-Hit %", f"{_pct(row['hard_hit_rate'])}%", "hard_hit_rate"),
+        ("Barrel %", f"{_pct(row['barrel_rate'])}%", "barrel_rate"),
+        ("Sweet-Spot %", f"{_pct(row['sweet_spot_rate'])}%", "sweet_spot_rate"),
+        ("xwOBACON", _rate3(row["xwobacon"]), None),
+        ("xBACON", _rate3(row["xbacon"]), None),
     ]
-    disp = pd.DataFrame(rows, columns=["Metric", "Value"])
+    if pctiles:
+        disp = pd.DataFrame(
+            [(m, v, pcol(k) if k else "") for m, v, k in rows],
+            columns=["Metric", "Value", "Pctile"],
+        )
+    else:
+        disp = pd.DataFrame([(m, v) for m, v, _ in rows], columns=["Metric", "Value"])
     return _table_html(disp)
 
 
@@ -719,6 +810,8 @@ def hitter_html_report(
     hitter_name: str,
     bats: str,
     batted_balls_df: pd.DataFrame | None = None,
+    percentiles: dict | None = None,
+    percentile_season: int | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a hitter batted-ball-quality report in the shared design.
@@ -739,6 +832,12 @@ def hitter_html_report(
     row = overall.iloc[0]
     cards = _hitter_cards(hitter_name, bats, row)
     bullets = _hitter_summary(row, platoon)
+
+    # League percentile section (both a table column and the Savant-style bars).
+    # Empty string when no percentiles were supplied, so the layout is unchanged.
+    pctile_bars_section = (
+        _percentile_bars(percentiles, percentile_season) if percentiles else ""
+    )
 
     visuals_html = ""
     if batted_balls_df is not None and not batted_balls_df.empty:
@@ -790,8 +889,10 @@ def hitter_html_report(
 
     <div class="section">
       <h2>Batted-Ball Profile</h2>
-      {_batted_ball_profile_table(row)}
+      {_batted_ball_profile_table(row, percentiles)}
     </div>
+
+    {pctile_bars_section}
 
     {platoon_section}
 

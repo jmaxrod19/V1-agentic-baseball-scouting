@@ -25,12 +25,13 @@ from datetime import datetime
 import pandas as pd
 
 try:
-    from . import config, loaders, metrics, validate
+    from . import config, loaders, metrics, percentiles, validate
     from .html_report import hitter_html_report, pitcher_html_report
 except ImportError:  # direct-script / non-package execution
     import config
     import loaders
     import metrics
+    import percentiles
     import validate
     from html_report import hitter_html_report, pitcher_html_report
 
@@ -270,8 +271,12 @@ def _pitcher_report(df: pd.DataFrame, name: str) -> str:
     )
 
 
-def _hitter_report(df: pd.DataFrame, name: str) -> tuple[str, int]:
-    """Render the hitter HTML from a one-batter DataFrame; return (html, n_bbe)."""
+def _hitter_report(df: pd.DataFrame, name: str, season: int) -> tuple[str, int]:
+    """Render the hitter HTML from a one-batter DataFrame; return (html, n_bbe).
+
+    `season` selects which league leaderboard to rank the hitter against for the
+    percentile section.
+    """
     bbe = metrics.batted_balls(df)
     overall = metrics.hitter_batted_ball(df)
     # Platoon splits are a bonus — degrade gracefully if p_throws is missing.
@@ -279,11 +284,22 @@ def _hitter_report(df: pd.DataFrame, name: str) -> tuple[str, int]:
         platoon = metrics.hitter_platoon_batted_ball(df)
     except (KeyError, ValueError):
         platoon = None
+
+    # League percentiles are best-effort: a baseline-pull failure (network,
+    # off-season) must not sink the whole report — it just renders without them.
+    pctiles = None
+    try:
+        pctiles = percentiles.hitter_percentiles(overall.iloc[0], season)
+    except Exception as exc:  # noqa: BLE001 — percentiles are optional context
+        print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
+
     html = hitter_html_report(
         overall, platoon,
         hitter_name=name,
         bats=bats_label(df),
         batted_balls_df=bbe,
+        percentiles=pctiles,
+        percentile_season=season,
     )
     return html, int(overall.iloc[0]["n_bbe"])
 
@@ -335,8 +351,10 @@ def generate_report(
                 f"No batted-ball data for {canonical} between {start} and {end}. "
                 f"If {canonical} is a pitcher, choose Pitcher."
             )
+        # Rank against the league season the range ends in.
+        season = datetime.strptime(end, "%Y-%m-%d").year
         try:
-            html, n_bbe = _hitter_report(df, canonical)
+            html, n_bbe = _hitter_report(df, canonical, season)
         except (KeyError, ValueError) as exc:
             # e.g. the player has pitches in range but zero balls in play.
             raise NoData(
