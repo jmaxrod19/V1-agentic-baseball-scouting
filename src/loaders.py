@@ -219,6 +219,27 @@ def pull_fangraphs(season: int, kind: str = "batting", qual: int = 0, **kwargs):
     raise ValueError("kind must be 'batting' or 'pitching'")
 
 
+def pull_league_hitting_baseline(season: int, min_bbe: int | str = "q") -> pd.DataFrame:
+    """Pull the Savant per-player exit-velocity / barrels leaderboard for a season.
+
+    One network call returns every qualified hitter's batted-ball-quality numbers
+    (avg/max exit velocity, hard-hit %, barrel %, sweet-spot %). We use that as
+    the league distribution to rank an individual hitter against — the raw
+    material for percentiles.
+
+    Args:
+        season:  e.g. 2024.
+        min_bbe: minimum batted-ball events to be included. 'q' = qualified
+                 hitters (Savant's own qualification), an int sets a custom floor.
+
+    Note: pybaseball is imported inside the function so importing this module
+    stays cheap and network-free (matches the other pull_* loaders).
+    """
+    from pybaseball import statcast_batter_exitvelo_barrels
+
+    return statcast_batter_exitvelo_barrels(season, minBBE=min_bbe)
+
+
 def _clean_fg_value_column(s: pd.Series, as_proportion: bool) -> pd.Series:
     """Try to turn one string column of FanGraphs values into numbers.
 
