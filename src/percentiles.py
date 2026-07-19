@@ -73,6 +73,63 @@ def percentile_of(value: float | None, population: pd.Series) -> int | None:
     return round(float((pop <= value).mean()) * 100)
 
 
+# Our display key -> Savant pitcher-percentile-rank column. These are already
+# 0-100 percentiles (oriented high = good), so we read them straight through
+# rather than computing — no scaling or ranking needed.
+_PITCHER_PERCENTILE_COLS: dict[str, str] = {
+    "fb_velocity": "fb_velocity",
+    "fb_spin": "fb_spin",
+    "whiff": "whiff_percent",
+    "chase": "chase_percent",
+    "k": "k_percent",
+    "bb": "bb_percent",
+    "hard_hit": "hard_hit_percent",
+    "barrel": "brl_percent",
+    "xera": "xera",
+    "xwoba": "xwoba",
+}
+
+
+def load_pitcher_percentile_baseline(season: int) -> pd.DataFrame:
+    """Return the season's per-pitcher percentile-rank table, cached to disk.
+
+    Same completed-season caching rule as the hitter baseline: a current-season
+    table still moves, so it's pulled fresh; finished seasons are frozen to CSV.
+    """
+    path = config.PROCESSED_DIR / f"league_pitcher_pctile_{season}.csv"
+    if path.exists():
+        return pd.read_csv(path)
+
+    df = loaders.pull_pitcher_percentile_ranks(season)
+    if not df.empty and season < date.today().year:
+        df.to_csv(path, index=False)
+    return df
+
+
+def pitcher_percentiles(player_id: int, season: int) -> dict[str, int | None]:
+    """Look up a pitcher's Savant percentile ranks by player id for a season.
+
+    Returns {display key: percentile 0-100}. An empty dict when the pitcher
+    isn't in the (qualified) table — the report then simply omits the section.
+    """
+    table = load_pitcher_percentile_baseline(season)
+    if table.empty or "player_id" not in table.columns:
+        return {}
+
+    match = table[table["player_id"] == player_id]
+    if match.empty:
+        return {}
+    row = match.iloc[0]
+
+    out: dict[str, int | None] = {}
+    for key, col in _PITCHER_PERCENTILE_COLS.items():
+        if col not in table.columns:
+            continue
+        val = row[col]
+        out[key] = None if pd.isna(val) else int(round(val))
+    return out
+
+
 def hitter_percentiles(profile: pd.Series | dict, season: int) -> dict[str, int | None]:
     """Map a hitter's batted-ball profile to a {metric: percentile} dict.
 

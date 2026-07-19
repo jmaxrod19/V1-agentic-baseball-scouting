@@ -240,6 +240,20 @@ def pull_league_hitting_baseline(season: int, min_bbe: int | str = "q") -> pd.Da
     return statcast_batter_exitvelo_barrels(season, minBBE=min_bbe)
 
 
+def pull_pitcher_percentile_ranks(season: int) -> pd.DataFrame:
+    """Pull Savant's per-pitcher percentile-rank table for a season.
+
+    Unlike the hitter baseline (raw values we rank ourselves), this table is
+    already expressed as 0-100 percentiles per pitcher — Savant's own "pitcher
+    card" (fastball velo/spin, whiff %, chase %, K/BB %, hard-hit/barrel %, xERA,
+    xwOBA), oriented so a higher percentile is always better. We match a pitcher
+    to it by player_id and display those percentiles directly.
+    """
+    from pybaseball import statcast_pitcher_percentile_ranks
+
+    return statcast_pitcher_percentile_ranks(season)
+
+
 def _clean_fg_value_column(s: pd.Series, as_proportion: bool) -> pd.Series:
     """Try to turn one string column of FanGraphs values into numbers.
 
