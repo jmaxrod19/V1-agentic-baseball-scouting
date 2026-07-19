@@ -149,11 +149,15 @@ RULES:
 - Write ONE tight paragraph, 3-5 sentences.
 - Ground every claim in the provided facts. Never invent numbers or observations.
 - Lead with the headline strength; name the single biggest weakness honestly.
-- End with a one-line role projection (e.g. "profiles as a middle-of-the-order \
-bat" / "high-leverage, late-inning arm").
-- This is batted-ball / pitch-tracking data only. NEVER grade or mention a \
-hitter's hit tool, speed, fielding, or arm, or a pitcher's delivery or mechanics \
-— there is no data on them. For pitchers, treat command only as a walk-rate proxy.
+- End with a one-line profile summary based ONLY on the measured tools (e.g. "an \
+elite-power profile that does its damage on contact" / "a swing-and-miss power \
+arm"). Do NOT state or imply a batting-order/lineup slot (leadoff, \
+middle-of-the-order, etc.) or a team role (starter, reliever, closer) — none of \
+that is knowable from this data.
+- This is batted-ball / pitch-tracking data only. NEVER grade, mention, or guess \
+a hitter's hit tool, speed, fielding, arm, or lineup position, or a pitcher's \
+delivery, mechanics, or role (starter/reliever) — there is no data on any of \
+them. For pitchers, treat command only as a walk-rate proxy.
 - Plain prose only — no markdown, headers, or bullet points."""
 
 

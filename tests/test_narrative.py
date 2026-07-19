@@ -110,3 +110,13 @@ def test_call_claude_returns_none_without_api_key(monkeypatch):
     # No key -> None, and it never reaches the (unimported) SDK.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert narrative._call_claude("sys", "user") is None
+
+
+def test_prompt_forbids_lineup_and_role_guesses():
+    # The data can't support batting order or team role — the prompt must forbid
+    # both (a "middle-of-the-order bat" / "closer" projection would be a guess).
+    prompt = narrative._SYSTEM_PROMPT.lower()
+    assert "lineup" in prompt
+    assert "starter" in prompt and "reliever" in prompt
+    # The old, over-reaching instruction to project a role must be gone.
+    assert "role projection" not in prompt
