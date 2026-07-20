@@ -5,3 +5,4 @@ scipy>=1.10            # gaussian_kde for pitch-location heatmaps
 fastapi>=0.110         # web app (webapp.py)
 uvicorn[standard]>=0.29  # ASGI server that runs the FastAPI app
 python-multipart>=0.0.9  # lets FastAPI parse the HTML form POST
+anthropic>=0.40          # Claude API — the agentic scouting narrative
