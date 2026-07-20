@@ -83,17 +83,26 @@ _HITTER_FACTS = [
     ("Barrel rate", "barrel_rate", "barrel_rate", lambda v: f"{v * 100:.1f}%"),
     ("Sweet-spot rate", "sweet_spot_rate", "sweet_spot_rate", lambda v: f"{v * 100:.1f}%"),
 ]
+# Labels for "bad-sounding" pitcher stats spell out the direction explicitly.
+# Savant's pitcher percentile table is oriented so higher is ALWAYS better — for
+# hard_hit/barrel/xera/xwoba/bb that means a HIGH percentile is a pitcher
+# SUPPRESSING that outcome (a strength), the opposite of what the raw stat name
+# implies in plain English. A first pass at this prompt let Claude read
+# "hard-hit rate against: 89th percentile" the literal way and invent a fake
+# weakness for a pitcher who was actually elite at contact suppression — these
+# labels remove the ambiguity at the source instead of relying on the model to
+# infer Savant's convention.
 _PITCHER_FACTS = [
     ("Fastball velocity", "fb_velocity"),
     ("Fastball spin", "fb_spin"),
     ("Whiff rate", "whiff"),
     ("Chase rate", "chase"),
     ("Strikeout rate", "k"),
-    ("Walk rate (command proxy)", "bb"),
-    ("Hard-hit rate against", "hard_hit"),
-    ("Barrel rate against", "barrel"),
-    ("Expected ERA", "xera"),
-    ("Expected wOBA", "xwoba"),
+    ("Walk rate / command (higher percentile = fewer walks, better command)", "bb"),
+    ("Hard-hit rate allowed (higher percentile = suppresses hard contact better)", "hard_hit"),
+    ("Barrel rate allowed (higher percentile = suppresses barrels better)", "barrel"),
+    ("Expected ERA (higher percentile = lower/better xERA)", "xera"),
+    ("Expected wOBA against (higher percentile = lower/better xwOBA)", "xwoba"),
 ]
 
 
@@ -150,10 +159,25 @@ Use natural scout descriptors: for hitters — "raw power", "loud contact", \
 two-plane, downer", changeup "tumble/fade", "swing-and-miss / put-away / chase \
 pitch", "plus velocity", "command".
 
+PERCENTILE DIRECTION — read this before writing a single word:
+Every percentile given to you, for every metric, is already oriented so a \
+HIGHER percentile always means BETTER performance for that player. There are \
+NO exceptions. In particular, for a pitcher, a HIGH percentile on "hard-hit \
+rate allowed", "barrel rate allowed", "walk rate / command", "expected ERA", \
+or "expected wOBA against" means he ALLOWS LESS of that outcome — it is a \
+STRENGTH, not a weakness. Do not reinterpret a percentile using what the raw \
+stat name would suggest in plain English (e.g. "hard-hit rate" sounding bad \
+when high) — the number handed to you has already been flipped to the \
+correct direction. Never state or imply the opposite of what a percentile says.
+
 RULES:
 - Write ONE tight paragraph, 3-5 sentences.
 - Ground every claim in the provided facts. Never invent numbers or observations.
-- Lead with the headline strength; name the single biggest weakness honestly.
+- Lead with the headline strength. Only call something a "weakness" or \
+"concern" if its grade is truly below average (45 or lower) — if every \
+metric grades 50 or above, there is no real weakness: note the relatively \
+least-elite tool in plain, neutral language instead, and do not use alarmist \
+words like "vulnerability", "exposed", or "red flag" for a merely average mark.
 - End with a one-line profile summary based ONLY on the measured tools (e.g. "an \
 elite-power profile that does its damage on contact" / "a swing-and-miss power \
 arm"). Do NOT state or imply a batting-order/lineup slot (leadoff, \

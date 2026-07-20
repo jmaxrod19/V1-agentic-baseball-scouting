@@ -72,7 +72,35 @@ def test_pitcher_fact_lines_are_percentile_only():
     lines = narrative._pitcher_fact_lines({"fb_velocity": 100, "bb": 44})
     joined = "\n".join(lines)
     assert "Fastball velocity: 100th percentile (80-grade, elite)" in joined
-    assert "Walk rate (command proxy): 44th percentile (50-grade, average)" in joined
+    assert "44th percentile (50-grade, average)" in joined
+
+
+def test_pitcher_fact_lines_spell_out_direction_for_inverted_stats():
+    # Regression test: a real Ohtani report had Claude read a high hard-hit
+    # percentile (= he SUPPRESSES hard contact well) as if it meant he ALLOWS a
+    # lot of hard contact, inventing a fake "vulnerability" for a pitcher with
+    # elite results. The labels for every stat where Savant's raw name reads
+    # "bad-sounding" but is already flipped (high=good) must say so explicitly.
+    lines = "\n".join(narrative._pitcher_fact_lines(
+        {"hard_hit": 90, "barrel": 90, "xera": 90, "xwoba": 90, "bb": 90}
+    ))
+    assert "suppresses hard contact better" in lines
+    assert "suppresses barrels better" in lines
+    assert "lower/better xERA" in lines
+    assert "lower/better xwOBA" in lines
+    assert "fewer walks, better command" in lines
+
+
+def test_system_prompt_states_percentile_direction_explicitly():
+    prompt = narrative._SYSTEM_PROMPT
+    assert "HIGHER percentile always means BETTER" in prompt
+    lowered = prompt.lower()
+    assert "hard-hit" in lowered and "strength, not a weakness" in lowered
+
+
+def test_system_prompt_forbids_manufactured_weakness():
+    prompt = narrative._SYSTEM_PROMPT
+    assert "below average (45 or lower)" in prompt
 
 
 # ---------------------------------------------------------------------------
