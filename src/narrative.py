@@ -6,9 +6,9 @@ Two pieces make up the narrative block:
    deterministically in code by mapping each metric's league percentile onto the
    20-80 scouting scale. No model involved, so it's always consistent.
 
-2. A **paragraph** written by Claude (claude-opus-4-8) from a fact sheet the code
-   builds (metric → value → percentile → grade → scout term) plus a style guide
-   and a hard scope rule. Best-effort: if the API key is missing or the call
+2. A **paragraph** written by Claude (Haiku — see _MODEL) from a fact sheet the
+   code builds (metric → value → percentile → grade → scout term) plus a style
+   guide and a hard scope rule. Best-effort: if the API key is missing or the call
    fails, the paragraph is None and the report simply shows the grade line + its
    existing rule-based bullets.
 
@@ -21,6 +21,11 @@ from __future__ import annotations
 
 import os
 import sys
+
+# Which Claude model writes the paragraph. Haiku 4.5 is the cost pick (~0.3¢ per
+# report vs ~1-2¢ on Opus): this is a short, heavily-scaffolded generation, so the
+# quality gap is small. Swap to "claude-opus-4-8" here for the most polished prose.
+_MODEL = "claude-haiku-4-5"
 
 # ---------------------------------------------------------------------------
 # Percentile -> 20-80 grade
@@ -196,7 +201,7 @@ def _call_claude(system: str, user: str) -> str | None:
 
         client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the env
         resp = client.messages.create(
-            model="claude-opus-4-8",
+            model=_MODEL,
             max_tokens=400,
             system=system,
             messages=[{"role": "user", "content": user}],
