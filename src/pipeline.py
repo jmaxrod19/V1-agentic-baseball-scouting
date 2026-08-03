@@ -341,6 +341,8 @@ def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
         hitter_name=name,
         bats=bats_label(df),
         batted_balls_df=bbe,
+        pitches_df=df,          # full pitch-level frame -> swing-geometry section
+        player_id=player_id,
         percentiles=pctiles,
         percentile_season=season,
         narrative=narr,

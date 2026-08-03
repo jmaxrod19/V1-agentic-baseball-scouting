@@ -254,6 +254,147 @@ def pull_pitcher_percentile_ranks(season: int) -> pd.DataFrame:
     return statcast_pitcher_percentile_ranks(season)
 
 
+# ===========================================================================
+# Savant leaderboard CSV endpoints (swing geometry — not in pybaseball)
+# ===========================================================================
+# The swing-path and bat-tracking leaderboards have no pybaseball wrapper, so
+# we hit their CSV export URLs directly. Savant blocks the default urllib
+# User-Agent, so we send a browser-like one; the response body is a CSV we hand
+# straight to pandas. urllib is stdlib, so this adds no dependency.
+
+def _fetch_savant_leaderboard_csv(url: str) -> pd.DataFrame:
+    """GET a Savant leaderboard CSV export and parse it into a DataFrame.
+
+    Kept private and separate so both public leaderboard pulls share one
+    network + parse path. Raises on an HTTP error (e.g. a 404 from a season
+    with no data) rather than returning a misleading empty frame — the caller
+    decides how to handle a season that predates bat tracking.
+    """
+    # Import inside the function so importing this module stays network-free and
+    # dependency-light (matches every other pull_* here).
+    import io
+    import urllib.request
+
+    # Savant returns 403/404 to the bare Python User-Agent, so identify as a
+    # browser. This is a public export endpoint — no auth, no cookies.
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=45) as response:
+        raw_csv = response.read().decode("utf-8", "replace")
+
+    # StringIO wraps the in-memory CSV text so pandas can read it like a file.
+    return pd.read_csv(io.StringIO(raw_csv))
+
+
+def pull_swing_path_leaderboard(season: int) -> pd.DataFrame:
+    """Pull the season's swing-path / attack-angle leaderboard (one row/hitter).
+
+    Columns include the biomechanics baseline we rank an individual against:
+    attack_angle, attack_direction, swing_tilt, ideal_attack_angle_rate, and the
+    season-average intercept + batter-box position. `id` is the player's
+    key_mlbam, which we match on.
+
+    Args:
+        season: e.g. 2024. Must be >= config.SWING_TRACKING_FIRST_SEASON; older
+                seasons predate bat tracking and 404 at the endpoint.
+    """
+    url = config.SWING_PATH_LEADERBOARD_URL.format(season=season)
+    return _fetch_savant_leaderboard_csv(url)
+
+
+def pull_bat_tracking_leaderboard(season: int) -> pd.DataFrame:
+    """Pull the season's bat-tracking leaderboard (one row per qualified hitter).
+
+    The "how hard / how efficient" companion to swing path: avg_bat_speed,
+    swing_length, squared_up_per_swing, blast_per_swing, hard_swing_rate, whiff
+    rates. Same `id` = key_mlbam key as the swing-path table.
+
+    Args:
+        season: e.g. 2024. Must be >= config.SWING_TRACKING_FIRST_SEASON.
+    """
+    url = config.BAT_TRACKING_LEADERBOARD_URL.format(season=season)
+    return _fetch_savant_leaderboard_csv(url)
+
+
+def pull_batting_stance_leaderboard() -> pd.DataFrame:
+    """Pull the batting-stance snapshot (the "feet" geometry, one row/hitter-side).
+
+    Columns: id (key_mlbam), name, bat_side, side, avg_batter_y_position (depth
+    in the box), avg_batter_x_position (distance off the plate), avg_foot_sep
+    (distance between the feet = stance width), avg_stance_angle (open/closed),
+    and the season-average intercept columns.
+
+    Takes no season: the Savant endpoint ignores year and returns one fixed
+    stance profile per hitter (see config.BATTING_STANCE_URL). Switch hitters
+    appear twice — once per `side` — so downstream joins key on (id, side).
+    """
+    return _fetch_savant_leaderboard_csv(config.BATTING_STANCE_URL)
+
+
+def _parse_height_to_inches(text: str | None) -> int | None:
+    """Parse a listed height like "6' 2\\"" into total inches (74). None if unparseable."""
+    import re
+
+    match = re.match(r"\s*(\d+)'\s*(\d+)", str(text or ""))
+    if not match:
+        return None
+    return int(match.group(1)) * 12 + int(match.group(2))
+
+
+def _fetch_statsapi_people(ids: list[int]) -> list[dict]:
+    """GET the statsapi people records for a batch of ids (one HTTP call).
+
+    The public, unauthenticated endpoint accepts a comma-separated `personIds`
+    list, so one request covers a whole leaderboard's worth of players. Returns
+    an empty list on any failure — height is a nice-to-have, never worth raising.
+    """
+    import json
+    import urllib.request
+
+    if not ids:
+        return []
+    joined = ",".join(str(int(i)) for i in ids)
+    url = f"https://statsapi.mlb.com/api/v1/people?personIds={joined}"
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=25) as response:
+            return json.loads(response.read().decode("utf-8")).get("people", [])
+    except Exception:
+        return []
+
+
+def pull_player_height(mlbam_id: int) -> dict | None:
+    """Look up one player's listed height from the MLB Stats API.
+
+    Returns {"text": "6' 2\\"", "inches": 74}, or None if the lookup fails.
+    Height is the biomechanical scale for the stance/contact map — it lets
+    distances (stance width, reach) be compared across players of different size.
+    """
+    people = _fetch_statsapi_people([mlbam_id])
+    if not people:
+        return None
+    text = people[0].get("height")
+    if not text:
+        return None
+    return {"text": text, "inches": _parse_height_to_inches(text)}
+
+
+def pull_player_heights(ids: list[int]) -> dict[int, int]:
+    """Batch-look-up listed heights for many players -> {mlbam_id: inches}.
+
+    Fetches in chunks of 100 ids (keeps the URL a sane length) and skips any
+    player whose height is missing or unparseable. Used to build the league
+    height distribution the stance percentiles rank against.
+    """
+    unique = list(dict.fromkeys(int(i) for i in ids))
+    out: dict[int, int] = {}
+    for start in range(0, len(unique), 100):
+        for person in _fetch_statsapi_people(unique[start:start + 100]):
+            inches = _parse_height_to_inches(person.get("height"))
+            if inches is not None:
+                out[int(person["id"])] = inches
+    return out
+
+
 def _clean_fg_value_column(s: pd.Series, as_proportion: bool) -> pd.Series:
     """Try to turn one string column of FanGraphs values into numbers.
 
