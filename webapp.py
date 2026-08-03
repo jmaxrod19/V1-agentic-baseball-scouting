@@ -96,11 +96,21 @@ def _page(body: str, title: str = "Scouting Reports") -> str:
 
 
 def _default_start() -> str:
-    return date.today().replace(day=1).isoformat()
+    # Default to the full season so far (from opening day, ~April 1), not just the
+    # current month — a month-to-date range is too thin for the bat-tracking
+    # visuals (contact clusters, per-pitch zones) to have enough swings. In the
+    # off-season (Jan–Mar) fall back to the previous completed season.
+    today = date.today()
+    year = today.year if today.month >= 4 else today.year - 1
+    return date(year, 4, 1).isoformat()
 
 
 def _default_end() -> str:
-    return date.today().isoformat()
+    today = date.today()
+    if today.month >= 4:
+        return today.isoformat()
+    # Off-season: pair the previous-season start with that season's end.
+    return date(today.year - 1, 10, 31).isoformat()
 
 
 def _form_body(start: str, end: str) -> str:

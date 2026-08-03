@@ -651,8 +651,13 @@ def _hitter_swing_geometry_section(
         if "stand" in pitches_df.columns and pitches_df["stand"].notna().any():
             side = pitches_df["stand"].mode().iloc[0]
         stance = swing_geometry.player_stance(player_id, side=side)
+        if not stance and season is not None:
+            # Not in the stance snapshot (no feet), but maybe in the swing-path
+            # leaderboard — use its batter-box position so we can still show the
+            # contact map (clusters, plate, measurements), just without the feet.
+            stance = swing_geometry.player_box_position(player_id, season, side=side)
         if not stance:
-            return ""  # hitter absent from the stance snapshot
+            return ""  # no box position anywhere -> can't place contact on the plate
         biomech = swing_geometry.stance_biomech(player_id, side=side)
         label = f"{hitter_name} ({season})" if season else hitter_name
         uri = charts.stance_contact_map(points, stance, player_name=label, biomech=biomech)

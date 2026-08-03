@@ -1099,8 +1099,15 @@ def stance_contact_map(
         # A real key. Each swatch is drawn as the SHAPE it represents (custom
         # handlers) so nothing reads as a generic rectangle: a foot ellipse, the
         # X marker, a translucent zone ellipse, the red measurement line, and a
-        # home-plate pentagon.
-        foot_h = Patch(facecolor=pal["foot"], edgecolor=pal["ink"], label="Feet = setup stance")
+        # home-plate pentagon. The feet entry is only shown when feet were drawn
+        # (i.e. the hitter had a stance row) — otherwise it would name a mark
+        # that isn't there.
+        has_feet = foot_sep is not None and not pd.isna(foot_sep)
+        handles, hmap = [], {}
+        if has_feet:
+            foot_h = Patch(facecolor=pal["foot"], edgecolor=pal["ink"], label="Feet = setup stance")
+            handles.append(foot_h)
+            hmap[foot_h] = _HandlerFoot()
         contact_h = Line2D([], [], marker="X", color=pal["ink"], markeredgecolor=pal["bg"],
                            linestyle="None", markersize=11, label="Average contact")
         zone_h = Patch(facecolor="#9aa3ab", edgecolor="#9aa3ab", alpha=0.35,
@@ -1108,11 +1115,12 @@ def stance_contact_map(
         measure_h = Line2D([], [], color=pal["measure"], linestyle="--",
                            label="Plate to center of mass")
         plate_h = Patch(facecolor="none", edgecolor=pal["ink"], label="Home plate")
+        handles += [contact_h, zone_h, measure_h, plate_h]
+        hmap[zone_h] = _HandlerEllipse()
+        hmap[plate_h] = _HandlerPlate()
         fig.legend(
-            handles=[foot_h, contact_h, zone_h, measure_h, plate_h],
-            handler_map={foot_h: _HandlerFoot(), zone_h: _HandlerEllipse(),
-                         plate_h: _HandlerPlate()},
-            loc="lower center", ncol=5, frameon=False, fontsize=9,
+            handles=handles, handler_map=hmap,
+            loc="lower center", ncol=len(handles), frameon=False, fontsize=9,
             labelcolor=pal["ink"], bbox_to_anchor=(0.5, 0.085),
         )
 
