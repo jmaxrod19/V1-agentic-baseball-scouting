@@ -622,21 +622,35 @@ def _hitter_visuals_section(batted_balls: pd.DataFrame) -> str:
     return _visuals_wrapper(blocks)
 
 
+def _swing_geo_disclaimer(message: str) -> str:
+    """The stance section header with a muted italic note explaining the gap.
+
+    Shown instead of a silent omission so the reader knows *why* the map isn't
+    there (data availability), not that the feature is broken.
+    """
+    return (
+        '<div class="section">\n'
+        '      <h2>Stance &amp; Contact Geometry</h2>\n'
+        f'      <p class="scout-scope">{message}</p>\n'
+        '    </div>'
+    )
+
+
 def _hitter_swing_geometry_section(
     pitches_df: pd.DataFrame | None,
     player_id: int | None,
     hitter_name: str,
     season: int | None,
 ) -> str:
-    """Full-width 'Stance & Contact Geometry' section, or "" if unavailable.
+    """Full-width 'Stance & Contact Geometry' section.
 
-    Best-effort like the percentile section: a missing stance row, a pre-bat-
-    tracking pull, or a network hiccup on the cached leaderboards must not sink
-    the report — it just renders without this section. Needs the raw pitch-level
-    frame (per-swing intercept points), not the batted-ball subset.
+    Best-effort like the percentile section — a data gap never sinks the report.
+    When the map can't be drawn we show a short disclaimer explaining why (rather
+    than silently dropping it). Needs the raw pitch-level frame (per-swing
+    intercept points), not the batted-ball subset.
     """
     if pitches_df is None or player_id is None:
-        return ""
+        return ""  # programmatic gap, not a user-facing data story
     try:
         from . import charts, swing_geometry
     except ImportError:
@@ -645,22 +659,37 @@ def _hitter_swing_geometry_section(
     try:
         points = swing_geometry.intercept_points(pitches_df)
         if points.empty:
-            return ""  # older pull with no bat-tracking columns
+            return _swing_geo_disclaimer(
+                "Bat-tracking (swing/intercept) data is only available from the "
+                "2024 season on — this date range has no tracked swings for it."
+            )
         # Batting side (L/R) picks the right stance row for switch hitters.
         side = None
         if "stand" in pitches_df.columns and pitches_df["stand"].notna().any():
             side = pitches_df["stand"].mode().iloc[0]
+
+        note = None
         stance = swing_geometry.player_stance(player_id, side=side)
         if not stance and season is not None:
             # Not in the stance snapshot (no feet), but maybe in the swing-path
             # leaderboard — use its batter-box position so we can still show the
             # contact map (clusters, plate, measurements), just without the feet.
             stance = swing_geometry.player_box_position(player_id, season, side=side)
+            if stance:
+                note = ("Feet / stance width unavailable — this hitter isn't in "
+                        "Statcast's tracked stance set; contact geometry shown from "
+                        "batter-box position.")
         if not stance:
-            return ""  # no box position anywhere -> can't place contact on the plate
+            return _swing_geo_disclaimer(
+                f"{hitter_name} isn't in Statcast's tracked stance or swing-path "
+                "sets for this season (typically limited playing time), so the "
+                "stance &amp; contact map can't be drawn."
+            )
         biomech = swing_geometry.stance_biomech(player_id, side=side)
         label = f"{hitter_name} ({season})" if season else hitter_name
-        uri = charts.stance_contact_map(points, stance, player_name=label, biomech=biomech)
+        uri = charts.stance_contact_map(
+            points, stance, player_name=label, biomech=biomech, note=note,
+        )
     except Exception as exc:  # noqa: BLE001 — this section is optional context
         import sys
         print(f"[swing-geometry] skipped for {hitter_name}: {exc}", file=sys.stderr)
