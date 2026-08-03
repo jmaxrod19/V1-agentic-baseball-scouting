@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -112,11 +113,23 @@ def bats_label(df: pd.DataFrame) -> str:
 # Player resolution
 # ---------------------------------------------------------------------------
 
+def _strip_accents(text: str) -> str:
+    """Lower-case and drop accent marks: 'José' -> 'jose'.
+
+    The Chadwick name registry stores accented names ('josé altuve'), so an exact
+    lookup of the un-accented spelling a user typically types ('Jose Altuve')
+    returns nothing. Comparing accent-stripped names bridges that gap.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(text))
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+
+
 def resolve_player(name: str) -> tuple[int, str]:
     """Look up a player's MLB id by name (works for pitchers and hitters).
 
     Args:
-        name: 'First Last' or 'Last, First'.
+        name: 'First Last' or 'Last, First'. Accents are optional — 'Jose Altuve'
+              resolves the same as 'José Altuve'.
 
     Returns:
         (mlbam_id, canonical_name).
@@ -141,6 +154,17 @@ def resolve_player(name: str) -> tuple[int, str]:
         first, last = " ".join(parts[:-1]), parts[-1]
 
     results = playerid_lookup(last, first)
+
+    if results.empty:
+        # Likely an accent the user didn't type (José, Andrés, Rodríguez, ...).
+        # Fuzzy-search, then keep only rows that match exactly once accents are
+        # stripped — so we resolve the real player, not just the nearest guess.
+        fuzzy = playerid_lookup(last, first, fuzzy=True)
+        if not fuzzy.empty:
+            results = fuzzy[
+                (fuzzy["name_last"].map(_strip_accents) == _strip_accents(last))
+                & (fuzzy["name_first"].map(_strip_accents) == _strip_accents(first))
+            ]
 
     if results.empty:
         raise PlayerNotFound(f"No player found for '{name}'. Check the spelling.")
