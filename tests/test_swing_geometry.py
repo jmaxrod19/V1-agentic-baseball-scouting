@@ -32,6 +32,10 @@ def _fake_league() -> pd.DataFrame:
             "avg_intercept_y_vs_batter": [28,   24,   26,   30],
             "avg_bat_speed":             [72,   68,   70,   74],
             "ideal_attack_angle_rate":   [0.55, 0.40, 0.50, 0.60],
+            # Batter-box position (also carried by the swing-path leaderboard) —
+            # used by player_box_position as the no-stance fallback.
+            "avg_batter_x_position":     [34,   30,   32,   36],
+            "avg_batter_y_position":     [20,   22,   21,   23],
         }
     )
 
@@ -103,6 +107,19 @@ def test_player_stance_returns_row_or_none(monkeypatch, tmp_path):
 
     # Unknown id -> None, so the chart layer can skip drawing feet cleanly.
     assert swing_geometry.player_stance(999) is None
+
+
+def test_player_box_position_from_swing_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(swing_geometry.config, "PROCESSED_DIR", tmp_path)
+    monkeypatch.setattr(loaders, "pull_swing_path_leaderboard", lambda *a, **k: _fake_league())
+
+    # id 101 is in the swing-path leaderboard -> box position returned.
+    pos = swing_geometry.player_box_position(101, 2024, side="R")
+    assert pos is not None
+    assert set(pos) == {"avg_batter_x_position", "avg_batter_y_position"}
+
+    # Unknown id -> None (caller then omits the section).
+    assert swing_geometry.player_box_position(999, 2024) is None
 
 
 def test_stance_biomech_height_adjusted_percentiles(monkeypatch, tmp_path):

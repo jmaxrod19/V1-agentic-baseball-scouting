@@ -58,8 +58,8 @@ def test_section_renders_with_good_frame(monkeypatch):
     assert "data:image/png;base64," in html
 
 
-def test_section_empty_when_hitter_absent_from_stance(monkeypatch):
-    df = pd.DataFrame(
+def _tracking_frame() -> pd.DataFrame:
+    return pd.DataFrame(
         {
             "pitch_type": ["FF"] * 20,
             "stand": ["R"] * 20,
@@ -69,6 +69,27 @@ def test_section_empty_when_hitter_absent_from_stance(monkeypatch):
             "intercept_ball_minus_batter_pos_y_inches": list(range(15, 35)),
         }
     )
-    # Hitter not in the stance snapshot -> player_stance returns None -> "".
+
+
+def test_section_falls_back_to_box_position_without_stance(monkeypatch):
+    # Not in the stance snapshot (no feet), but present in the swing-path
+    # leaderboard -> use box position and still render the contact map.
     monkeypatch.setattr(swing_geometry, "player_stance", lambda pid, side=None: None)
-    assert html_report._hitter_swing_geometry_section(df, 999, "Nobody", 2024) == ""
+    monkeypatch.setattr(
+        swing_geometry, "player_box_position",
+        lambda pid, season, side=None: {
+            "avg_batter_x_position": 30.0, "avg_batter_y_position": 22.0,
+        },
+    )
+    monkeypatch.setattr(swing_geometry, "stance_biomech", lambda pid, side=None: None)
+
+    html = html_report._hitter_swing_geometry_section(_tracking_frame(), 999, "Fallback Guy", 2024)
+    assert "Stance &amp; Contact Geometry" in html
+    assert "data:image/png;base64," in html
+
+
+def test_section_empty_when_no_position_anywhere(monkeypatch):
+    # Absent from BOTH the stance snapshot and the swing-path leaderboard -> "".
+    monkeypatch.setattr(swing_geometry, "player_stance", lambda pid, side=None: None)
+    monkeypatch.setattr(swing_geometry, "player_box_position", lambda pid, season, side=None: None)
+    assert html_report._hitter_swing_geometry_section(_tracking_frame(), 999, "Nobody", 2024) == ""

@@ -119,6 +119,33 @@ def player_stance(player_id: int, side: str | None = None) -> dict | None:
     return match.iloc[0].to_dict()
 
 
+def player_box_position(player_id: int, season: int, side: str | None = None) -> dict | None:
+    """Batter's box position (avg_batter_x/y) from the swing-path leaderboard.
+
+    A fallback for the chart when a hitter is absent from the batting-stance
+    snapshot (which carries the feet) but still appears in the season's swing-path
+    leaderboard (which also reports batter-box position). Returns a minimal
+    stance-like dict with just the box position — enough to place the contact
+    cloud over the plate and draw the measurements/bat, without the feet — or
+    None if the hitter has no box position either.
+    """
+    sp = load_swing_path_baseline(season)
+    if sp.empty or "id" not in sp.columns:
+        return None
+    match = sp[sp["id"] == player_id]
+    if side is not None and "side" in match.columns:
+        by_side = match[match["side"] == side]
+        if not by_side.empty:
+            match = by_side
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    bx, by = row.get("avg_batter_x_position"), row.get("avg_batter_y_position")
+    if bx is None or by is None or pd.isna(bx) or pd.isna(by):
+        return None
+    return {"avg_batter_x_position": float(bx), "avg_batter_y_position": float(by)}
+
+
 def load_league_heights() -> pd.DataFrame:
     """Return {id, height_in} for every hitter in the stance snapshot, cached.
 
