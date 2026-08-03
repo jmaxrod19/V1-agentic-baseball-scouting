@@ -51,3 +51,64 @@ def test_ev_distribution_raises_when_all_values_null():
     # must raise, not embed a blank histogram.
     with pytest.raises(ValueError):
         charts.ev_distribution(pd.DataFrame({"launch_speed": [np.nan, np.nan]}))
+
+
+# ---------------------------------------------------------------------------
+# stance_contact_map — the top-down batter's-box view
+# ---------------------------------------------------------------------------
+
+# ~40 swings across a few pitch types, enough for at least one zone ellipse.
+_POINTS = pd.DataFrame(
+    {
+        "intercept_side_in":  np.linspace(38, 48, 40),
+        "intercept_depth_in": np.linspace(15, 30, 40),
+        "pitch_type":         (["FF"] * 20) + (["SL"] * 12) + (["CH"] * 8),
+    }
+)
+
+# A stance row shaped like swing_geometry.player_stance() output.
+_STANCE = {
+    "avg_batter_x_position": 34.7,
+    "avg_batter_y_position": 20.2,
+    "avg_foot_sep": 36.8,
+    "avg_stance_angle": -2.7,
+    "side": "R",
+}
+
+
+def test_stance_map_returns_png_data_uri():
+    uri = charts.stance_contact_map(_POINTS, _STANCE, player_name="Test Hitter")
+    assert uri.startswith("data:image/png;base64,")
+    assert len(uri) > 100
+
+
+def test_stance_map_with_biomech_context():
+    # Passing biomech exercises the caption (percentiles) + title path.
+    uri = charts.stance_contact_map(
+        _POINTS, _STANCE, player_name="Test Hitter",
+        biomech={"height_text": "6' 2\"", "stance_width_pct": 87, "reach_pct": 12},
+    )
+    assert uri.startswith("data:image/png;base64,")
+
+
+def test_stance_map_works_without_pitch_type():
+    # No pitch_type column -> one neutral cloud, no legend, still valid.
+    uri = charts.stance_contact_map(_POINTS.drop(columns=["pitch_type"]), _STANCE)
+    assert uri.startswith("data:image/png;base64,")
+
+
+def test_stance_map_raises_on_empty_points():
+    with pytest.raises(ValueError):
+        charts.stance_contact_map(
+            pd.DataFrame({"intercept_side_in": [], "intercept_depth_in": []}), _STANCE
+        )
+
+
+def test_stance_map_raises_on_missing_coordinate_columns():
+    with pytest.raises(ValueError):
+        charts.stance_contact_map(pd.DataFrame({"foo": [1, 2]}), _STANCE)
+
+
+def test_stance_map_raises_when_stance_has_no_box_position():
+    with pytest.raises(ValueError):
+        charts.stance_contact_map(_POINTS, {"avg_foot_sep": 36.0})  # no x/y
