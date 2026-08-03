@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import io
+import textwrap
 
 import matplotlib
 matplotlib.use("Agg")  # headless backend — must be set before pyplot import
@@ -948,6 +949,7 @@ def stance_contact_map(
     theme: str = "midnight",
     show_box: bool = True,
     show_bat: bool = True,
+    note: str | None = None,
 ) -> str:
     """Small-multiple batter's-box view: one clean panel per pitch type.
 
@@ -1047,6 +1049,14 @@ def stance_contact_map(
                 _draw_measurements(ax, bx, by, pal)
                 if biomech:
                     _biomech_caption(ax, biomech, pal)
+                elif note:
+                    # No stance/biomech data — explain why the feet aren't drawn.
+                    # Wrap to a fixed width so it stays inside the panel.
+                    wrapped = textwrap.fill(note, width=34)
+                    ax.text(0.035, 0.965, wrapped, transform=ax.transAxes, fontsize=8,
+                            va="top", ha="left", color=pal["ink"], style="italic",
+                            bbox=dict(boxstyle="round,pad=0.45", facecolor=pal["caption"],
+                                      edgecolor=pal["ink"], linewidth=1.0))
             # The contact marker (overall on hero, this pitch elsewhere).
             ax.scatter([cx], [cy], s=150 if is_hero else 120, marker="X",
                        color=pal["ink"], edgecolor=pal["bg"], linewidth=1.2, zorder=8)

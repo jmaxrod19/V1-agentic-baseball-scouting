@@ -20,10 +20,12 @@ def test_section_empty_without_inputs():
     assert html_report._hitter_swing_geometry_section(pd.DataFrame(), None, "X", 2024) == ""
 
 
-def test_section_empty_when_pull_has_no_tracking():
-    # An older pull without the intercept columns -> intercept_points empty -> "".
+def test_section_disclaimer_when_pull_has_no_tracking():
+    # An older pull without the intercept columns -> disclaimer, not silence.
     df = pd.DataFrame({"pitch_type": ["FF", "SL"], "release_speed": [95, 85]})
-    assert html_report._hitter_swing_geometry_section(df, 123, "X", 2024) == ""
+    html = html_report._hitter_swing_geometry_section(df, 123, "X", 2024)
+    assert "Stance &amp; Contact Geometry" in html
+    assert "2024 season" in html and "data:image" not in html
 
 
 def test_section_renders_with_good_frame(monkeypatch):
@@ -88,8 +90,11 @@ def test_section_falls_back_to_box_position_without_stance(monkeypatch):
     assert "data:image/png;base64," in html
 
 
-def test_section_empty_when_no_position_anywhere(monkeypatch):
-    # Absent from BOTH the stance snapshot and the swing-path leaderboard -> "".
+def test_section_disclaimer_when_no_position_anywhere(monkeypatch):
+    # Absent from BOTH the stance snapshot and the swing-path leaderboard ->
+    # a disclaimer explaining why, not a silent drop.
     monkeypatch.setattr(swing_geometry, "player_stance", lambda pid, side=None: None)
     monkeypatch.setattr(swing_geometry, "player_box_position", lambda pid, season, side=None: None)
-    assert html_report._hitter_swing_geometry_section(_tracking_frame(), 999, "Nobody", 2024) == ""
+    html = html_report._hitter_swing_geometry_section(_tracking_frame(), 999, "Nobody", 2024)
+    assert "Stance &amp; Contact Geometry" in html
+    assert "isn't in Statcast" in html and "data:image" not in html
