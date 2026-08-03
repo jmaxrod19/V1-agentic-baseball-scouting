@@ -622,6 +622,54 @@ def _hitter_visuals_section(batted_balls: pd.DataFrame) -> str:
     return _visuals_wrapper(blocks)
 
 
+def _hitter_swing_geometry_section(
+    pitches_df: pd.DataFrame | None,
+    player_id: int | None,
+    hitter_name: str,
+    season: int | None,
+) -> str:
+    """Full-width 'Stance & Contact Geometry' section, or "" if unavailable.
+
+    Best-effort like the percentile section: a missing stance row, a pre-bat-
+    tracking pull, or a network hiccup on the cached leaderboards must not sink
+    the report — it just renders without this section. Needs the raw pitch-level
+    frame (per-swing intercept points), not the batted-ball subset.
+    """
+    if pitches_df is None or player_id is None:
+        return ""
+    try:
+        from . import charts, swing_geometry
+    except ImportError:
+        import charts, swing_geometry
+
+    try:
+        points = swing_geometry.intercept_points(pitches_df)
+        if points.empty:
+            return ""  # older pull with no bat-tracking columns
+        # Batting side (L/R) picks the right stance row for switch hitters.
+        side = None
+        if "stand" in pitches_df.columns and pitches_df["stand"].notna().any():
+            side = pitches_df["stand"].mode().iloc[0]
+        stance = swing_geometry.player_stance(player_id, side=side)
+        if not stance:
+            return ""  # hitter absent from the stance snapshot
+        biomech = swing_geometry.stance_biomech(player_id, side=side)
+        label = f"{hitter_name} ({season})" if season else hitter_name
+        uri = charts.stance_contact_map(points, stance, player_name=label, biomech=biomech)
+    except Exception as exc:  # noqa: BLE001 — this section is optional context
+        import sys
+        print(f"[swing-geometry] skipped for {hitter_name}: {exc}", file=sys.stderr)
+        return ""
+
+    return (
+        '<div class="section">\n'
+        '      <h2>Stance &amp; Contact Geometry</h2>\n'
+        f'      <img alt="Stance and contact map for {hitter_name}" src="{uri}"'
+        ' style="width:100%;height:auto;display:block;">\n'
+        '    </div>'
+    )
+
+
 def _visuals_wrapper(blocks: list[str]) -> str:
     """Wrap rendered visual blocks in the shared Visuals section markup."""
     return (
@@ -879,6 +927,8 @@ def hitter_html_report(
     hitter_name: str,
     bats: str,
     batted_balls_df: pd.DataFrame | None = None,
+    pitches_df: pd.DataFrame | None = None,
+    player_id: int | None = None,
     percentiles: dict | None = None,
     percentile_season: int | None = None,
     narrative: dict | None = None,
@@ -917,6 +967,11 @@ def hitter_html_report(
     visuals_html = ""
     if batted_balls_df is not None and not batted_balls_df.empty:
         visuals_html = _hitter_visuals_section(batted_balls_df)
+
+    # V2 swing-geometry section (best-effort; empty string if unavailable).
+    swing_geo_html = _hitter_swing_geometry_section(
+        pitches_df, player_id, hitter_name, percentile_season,
+    )
 
     cards_html = "\n".join(
         f'<div class="card"><div class="card-label">{label}</div>'
@@ -974,6 +1029,8 @@ def hitter_html_report(
     {platoon_section}
 
     {visuals_html}
+
+    {swing_geo_html}
 
     {_glossary_section(_HITTER_GLOSSARY)}
 
