@@ -178,19 +178,23 @@ WITH joined AS (
         s.side,
         s.avg_foot_sep,
         s.avg_intercept_y_vs_batter,
+        s.avg_batter_y_position,
         h.height_in,
         s.avg_foot_sep              / h.height_in AS width_ratio,
-        s.avg_intercept_y_vs_batter / h.height_in AS reach_ratio
+        s.avg_intercept_y_vs_batter / h.height_in AS reach_ratio,
+        s.avg_batter_y_position     / h.height_in AS depth_ratio
     FROM league_stance s
     JOIN league_heights h ON s.id = h.id
     WHERE h.height_in IS NOT NULL
       AND s.avg_foot_sep IS NOT NULL
       AND s.avg_intercept_y_vs_batter IS NOT NULL
+      AND s.avg_batter_y_position IS NOT NULL
 ),
 ranked AS (
     SELECT *,
         CUME_DIST() OVER (ORDER BY width_ratio) AS width_pct,
-        CUME_DIST() OVER (ORDER BY reach_ratio) AS reach_pct
+        CUME_DIST() OVER (ORDER BY reach_ratio) AS reach_pct,
+        CUME_DIST() OVER (ORDER BY depth_ratio) AS depth_pct
     FROM joined
 )
 SELECT * FROM ranked WHERE id = ?
@@ -198,12 +202,14 @@ SELECT * FROM ranked WHERE id = ?
 
 
 def stance_biomech(player_id: int, side: str | None = None) -> dict | None:
-    """Height-adjusted league percentiles for stance width and out-front reach.
+    """Height-adjusted league percentiles for stance width, depth, and reach.
 
-    Returns {height_in, height_text, stance_width, stance_width_pct, reach,
-    reach_pct}, or None if the hitter has no stance/height data to rank. The two
-    percentiles answer "how wide is his stance / how far out front does he meet
-    the ball, FOR A HITTER HIS SIZE" — the biomechanical read the chart shows.
+    Returns {height_in, height_text, stance_width, stance_width_pct,
+    stance_depth, stance_depth_pct, reach, reach_pct}, or None if the hitter has
+    no stance/height data to rank. Each percentile divides the raw stance metric
+    by the hitter's own height before ranking against the league, so it answers
+    "how wide/deep is his stance FOR A HITTER HIS SIZE" — a 6'6" and a 5'9"
+    hitter are compared fairly instead of just by raw inches.
     """
     import duckdb
 
@@ -235,6 +241,8 @@ def stance_biomech(player_id: int, side: str | None = None) -> dict | None:
         "height_text": f"{inches // 12}' {inches % 12}\"",
         "stance_width": float(row["avg_foot_sep"]),
         "stance_width_pct": _pct(row["width_pct"]),
+        "stance_depth": float(row["avg_batter_y_position"]),
+        "stance_depth_pct": _pct(row["depth_pct"]),
         "reach": float(row["avg_intercept_y_vs_batter"]),
         "reach_pct": _pct(row["reach_pct"]),
     }

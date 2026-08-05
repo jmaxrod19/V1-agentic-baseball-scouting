@@ -42,7 +42,7 @@ def _fake_league() -> pd.DataFrame:
 
 def _fake_stance() -> pd.DataFrame:
     # Stance snapshot keyed on (id, side). Same 3rd-of-4 trick: target id=101 is
-    # the 75th percentile in both feet metrics.
+    # the 75th percentile on every metric here.
     return pd.DataFrame(
         {
             "id":   [101, 102, 103, 104],
@@ -51,6 +51,8 @@ def _fake_stance() -> pd.DataFrame:
             "avg_stance_angle": [5,  3,  4,  6],     # 5  is 3rd of 4 -> 75th pct
             # Needed by the height-adjusted biomech query (reach metric).
             "avg_intercept_y_vs_batter": [26, 24, 25, 27],
+            # Depth in box — needed by the height-adjusted biomech query.
+            "avg_batter_y_position": [24, 20, 22, 26],  # 24 is 3rd of 4 -> 75th pct
         }
     )
 
@@ -134,8 +136,11 @@ def test_stance_biomech_height_adjusted_percentiles(monkeypatch, tmp_path):
     assert bio is not None
     assert bio["height_in"] == 70
     assert bio["stance_width_pct"] == 75          # 3rd of 4 on width/height
+    assert bio["stance_depth"] == 24               # raw depth-in-box, inches
+    assert bio["stance_depth_pct"] == 75           # 3rd of 4 on depth/height
     # Percentiles are clamped to 1..99 (no "0th"/"100th").
     assert 1 <= bio["stance_width_pct"] <= 99
+    assert 1 <= bio["stance_depth_pct"] <= 99
     assert 1 <= bio["reach_pct"] <= 99
 
 
