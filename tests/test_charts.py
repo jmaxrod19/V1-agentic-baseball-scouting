@@ -108,8 +108,9 @@ def test_biomech_caption_phrases_below_median_as_narrower_and_shallower():
         )
         texts = [t.get_text() for t in ax.texts]
         combined = " ".join(texts)
+        assert "VS. HITTERS HIS SIZE" in combined
         assert "narrower than 99%" in combined
-        assert "shallower in the box than 99%" in combined
+        assert "shallower than 99%" in combined
     finally:
         plt.close(fig)
 

@@ -899,16 +899,34 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-def _biomech_caption(ax, biomech: dict, pal: dict) -> None:
-    """Upper-left callout: height + how the stance compares FOR HIS SIZE.
+def _place_below(ax, anchor_text, gap: float = 0.02):
+    """Return the axes-fraction y just below `anchor_text`'s ACTUAL rendered box.
 
-    Made deliberately prominent (bold, boxed, accent color) because it's the
-    headline biomechanical read. Both percentiles are height-adjusted (see
-    stance_biomech): stance width and depth-in-box are each divided by the
-    hitter's own height before ranking, so a 6'6" and a 5'9" hitter are compared
-    fairly instead of by raw inches. Phrasing each as "wider/deeper than N% of
-    hitters his size" makes the direction unmistakable without the reader
-    needing to know how to read a raw percentile.
+    Not a hand-tuned offset guessed from a row count — that class of fix breaks
+    the moment a row is added (exactly what happened here once "Depth in box"
+    became a 3rd stat row and pushed the old fixed offset into the plate). This
+    measures the real rendered extent, so a caller can stack boxes without
+    ever having to re-tune a magic number as their content grows.
+    """
+    fig = ax.figure
+    fig.canvas.draw()  # forces a layout pass so the text has a real extent
+    bottom = anchor_text.get_window_extent(
+        renderer=fig.canvas.get_renderer()
+    ).transformed(ax.transAxes.inverted()).y0
+    return bottom - gap
+
+
+def _biomech_caption(ax, biomech: dict, pal: dict) -> None:
+    """Upper-left callout, split into two clearly separate boxes:
+
+    1. Raw measurements — height, stance width, depth in box. Just facts,
+       no comparison.
+    2. A second, headed box: "VS. HITTERS HIS SIZE" — the height-adjusted
+       league percentiles for those same two stance metrics (stance width and
+       depth-in-box are each divided by the hitter's own height before ranking,
+       so a 6'6" and a 5'9" hitter are compared fairly instead of by raw
+       inches). Keeping this in its own box with its own header stops a reader
+       from mistaking a percentile for another raw measurement.
     """
     height_text = biomech.get("height_text")
     width = biomech.get("stance_width")
@@ -918,8 +936,7 @@ def _biomech_caption(ax, biomech: dict, pal: dict) -> None:
     if height_text is None and width is None:
         return
 
-    # One tidy stat box: the hard numbers (height, stance width, depth in box)
-    # on top, then the plain-language league context lines below.
+    # Box 1 — hard numbers only.
     stat_rows = []
     if height_text:
         stat_rows.append(f"Height:  {height_text}")
@@ -928,21 +945,6 @@ def _biomech_caption(ax, biomech: dict, pal: dict) -> None:
     if depth is not None:
         stat_rows.append(f'Depth in box:  {depth:.0f}"')
 
-    # Phrase each the natural way round: a high percentile reads "wider/deeper
-    # than X%", a low one "narrower/shallower than (100-X)%" — so a 1st-pct
-    # stance says "narrower than 99%" instead of the confusing "wider than 1%".
-    contexts = []
-    if width_pct is not None:
-        if width_pct >= 50:
-            contexts.append(f"wider than {width_pct}% of hitters his size")
-        else:
-            contexts.append(f"narrower than {100 - width_pct}% of hitters his size")
-    if depth_pct is not None:
-        if depth_pct >= 50:
-            contexts.append(f"stands deeper in the box than {depth_pct}% of hitters his size")
-        else:
-            contexts.append(f"stands shallower in the box than {100 - depth_pct}% of hitters his size")
-
     stat_text = ax.text(
         0.035, 0.965, "\n".join(stat_rows), transform=ax.transAxes,
         fontsize=10.5, va="top", ha="left", color=pal["ink"], fontweight="bold",
@@ -950,23 +952,40 @@ def _biomech_caption(ax, biomech: dict, pal: dict) -> None:
         bbox=dict(boxstyle="round,pad=0.5", facecolor=pal["caption"],
                   edgecolor=pal["ink"], linewidth=1.2),
     )
-    if not contexts:
+
+    # Box 2 — the percentile section, headed so it reads as its own thing.
+    # Phrase each the natural way round: a high percentile reads "wider/deeper
+    # than X%", a low one "narrower/shallower than (100-X)%" — so a 1st-pct
+    # stance says "narrower than 99%" instead of the confusing "wider than 1%".
+    # The header already establishes "vs. hitters his size", so each line drops
+    # that trailing phrase to stay tight.
+    pct_rows = []
+    if width_pct is not None:
+        if width_pct >= 50:
+            pct_rows.append(f"Stance width:  wider than {width_pct}%")
+        else:
+            pct_rows.append(f"Stance width:  narrower than {100 - width_pct}%")
+    if depth_pct is not None:
+        if depth_pct >= 50:
+            pct_rows.append(f"Depth in box:  deeper than {depth_pct}%")
+        else:
+            pct_rows.append(f"Depth in box:  shallower than {100 - depth_pct}%")
+    if not pct_rows:
         return
 
-    # Place the context lines just below the stat box's ACTUAL rendered bottom
-    # edge, rather than a hand-tuned offset guessed from the row count. A fixed
-    # per-row estimate breaks the moment a row is added (which is exactly what
-    # happened here once "Depth in box" became a 3rd stat row) — measuring the
-    # real box avoids that class of bug for good, however many rows it grows to.
-    fig = ax.figure
-    fig.canvas.draw()  # forces a layout pass so the text has a real extent
-    box_bottom_axes = stat_text.get_window_extent(
-        renderer=fig.canvas.get_renderer()
-    ).transformed(ax.transAxes.inverted()).y0
-
-    ax.text(0.045, box_bottom_axes - 0.02, "\n".join(contexts),
-            transform=ax.transAxes, fontsize=8.5, va="top", ha="left",
-            color=pal["ink"], style="italic")
+    # One box, sized automatically to its own content (same technique as box 1,
+    # not manual rectangle math) so it can never mismatch or overlap. The header
+    # is its own ALL-CAPS line, which reads as a label without needing mixed
+    # bold/italic runs inside a single Text object (matplotlib can't do that
+    # cleanly for plain text).
+    pct_y = _place_below(ax, stat_text, gap=0.025)
+    ax.text(
+        0.035, pct_y, "VS. HITTERS HIS SIZE\n" + "\n".join(pct_rows),
+        transform=ax.transAxes, fontsize=8.5, va="top", ha="left",
+        color=pal["ink"], linespacing=1.6,
+        bbox=dict(boxstyle="round,pad=0.45", facecolor=pal["caption"],
+                  edgecolor=pal["ink"], linewidth=1.0),
+    )
 
 
 def stance_contact_map(
