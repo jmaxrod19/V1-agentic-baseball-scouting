@@ -83,12 +83,35 @@ def test_stance_map_returns_png_data_uri():
 
 
 def test_stance_map_with_biomech_context():
-    # Passing biomech exercises the caption (percentiles) + title path.
+    # Passing biomech exercises the caption (width + depth percentiles) + title.
     uri = charts.stance_contact_map(
         _POINTS, _STANCE, player_name="Test Hitter",
-        biomech={"height_text": "6' 2\"", "stance_width_pct": 87, "reach_pct": 12},
+        biomech={
+            "height_text": "6' 2\"", "stance_width_pct": 87,
+            "stance_depth": 20.2, "stance_depth_pct": 30, "reach_pct": 12,
+        },
     )
     assert uri.startswith("data:image/png;base64,")
+
+
+def test_biomech_caption_phrases_below_median_as_narrower_and_shallower():
+    # A below-50 percentile should read "narrower"/"shallower", not the
+    # confusing "wider/deeper than 1%" a naive phrasing would produce.
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    try:
+        charts._biomech_caption(
+            ax,
+            {"height_text": "5' 8\"", "stance_width": 8, "stance_width_pct": 1,
+             "stance_depth": 30, "stance_depth_pct": 1},
+            charts._STANCE_THEMES["report"],
+        )
+        texts = [t.get_text() for t in ax.texts]
+        combined = " ".join(texts)
+        assert "narrower than 99%" in combined
+        assert "shallower in the box than 99%" in combined
+    finally:
+        plt.close(fig)
 
 
 def test_stance_map_works_without_pitch_type():
