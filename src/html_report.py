@@ -7,7 +7,7 @@ it is a pure display layer: every decimal→percentage conversion happens here,
 never in metrics.py.
 
 Charts are added in a later pass; this module renders the header, summary cards,
-the auto-written narrative, and the three data tables.
+the rule-based written summary, and the three data tables.
 
 Public functions:
     pitcher_html_report(...) -> str      (full HTML document)
@@ -116,11 +116,6 @@ _CSS = """
     .glossary dd { margin: 3px 0 0; color: var(--muted); }
     .glossary-src { margin-top: 12px; color: var(--muted); font-size: 12px; font-style: italic; }
     .footer-note { margin-top: 28px; color: var(--muted); font-size: 13px; }
-    .grade-line {
-      font-weight: 700; font-size: 15px; letter-spacing: 0.02em;
-      margin: 0 0 10px; color: var(--ink);
-    }
-    .scout-narrative { margin: 0; }
     .scout-scope { margin: 8px 0 0; color: var(--muted); font-size: 12px; font-style: italic; }
     .pctile-caption { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
     .pctile-row { display: flex; align-items: center; margin: 12px 0; }
@@ -216,34 +211,6 @@ _PITCHER_PCTILE_METRICS = [
     ("xera", "xERA"),
     ("xwoba", "xwOBA"),
 ]
-
-
-_NARRATIVE_SCOPE = {
-    "hitter": "Grades reflect batted-ball data only — hit tool, plate discipline, "
-              "speed, and defense are not gradable here.",
-    "pitcher": "Grades reflect pitch-tracking and outcome data — a proxy for stuff "
-               "and command, not a substitute for eyes on delivery and pitch shape.",
-}
-
-
-def _narrative_section(narrative: dict | None, kind: str) -> str:
-    """Render the Scouting Summary block: the deterministic grade line, the optional
-    Claude paragraph, and the honest scope disclaimer. '' when no grade line."""
-    if not narrative or not narrative.get("grade_line"):
-        return ""
-    body = f'<p class="grade-line">{html.escape(narrative["grade_line"])}</p>'
-    paragraph = narrative.get("paragraph")
-    if paragraph:
-        body += f'\n      <p class="scout-narrative">{html.escape(paragraph)}</p>'
-    scope = _NARRATIVE_SCOPE.get(kind, "")
-    if scope:
-        body += f'\n      <p class="scout-scope">{scope}</p>'
-    return (
-        '<div class="section">\n'
-        '      <h2>Scouting Summary</h2>\n'
-        f'      {body}\n'
-        '    </div>'
-    )
 
 
 def _percentile_bars(pctiles: dict, metric_labels: list[tuple[str, str]], caption: str) -> str:
@@ -729,7 +696,6 @@ def pitcher_html_report(
     pitches: pd.DataFrame | None = None,
     percentiles: dict | None = None,
     percentile_season: int | None = None,
-    narrative: dict | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a full HTML scouting-report document.
@@ -796,8 +762,6 @@ def pitcher_html_report(
       {cards_html}
     </div>
 
-    {_narrative_section(narrative, "pitcher")}
-
     <div class="section">
       <h2>Written Summary</h2>
       <ul class="summary-list">
@@ -840,9 +804,9 @@ def pitcher_html_report(
 # Hitter report — batted-ball quality (reuses the same design + helpers)
 # ===========================================================================
 
-# Barrel-rate tiers for the narrative. Rough league benchmarks: ~8% barrel rate
+# Barrel-rate tiers for the written summary. Rough league benchmarks: ~8% barrel rate
 # is league-average, ~10%+ is a good power hitter, ~13%+ is elite. These are
-# narrative judgment calls, not Statcast-defined constants — revisit per season.
+# summary judgment calls, not Statcast-defined constants — revisit per season.
 _BARREL_GOOD = 0.10
 _BARREL_ELITE = 0.13
 
@@ -871,7 +835,7 @@ def _hitter_cards(hitter_name: str, bats: str, row: pd.Series) -> list[tuple[str
 
 
 def _hitter_summary(row: pd.Series, platoon: pd.DataFrame | None) -> list[str]:
-    """Auto-written batted-ball-quality narrative bullets."""
+    """Rule-based batted-ball-quality summary bullets."""
     bullets = [
         f"{int(row['n_bbe'])} batted balls tracked — average exit velocity "
         f"{_fmt(row['avg_ev'], 1)} mph, topping out at {_fmt(row['max_ev'], 1)} mph.",
@@ -965,7 +929,6 @@ def hitter_html_report(
     player_id: int | None = None,
     percentiles: dict | None = None,
     percentile_season: int | None = None,
-    narrative: dict | None = None,
     subtitle: str = "Version 1 HTML report",
 ) -> str:
     """Render a hitter batted-ball-quality report in the shared design.
@@ -1043,8 +1006,6 @@ def hitter_html_report(
     <div class="cards">
       {cards_html}
     </div>
-
-    {_narrative_section(narrative, "hitter")}
 
     <div class="section">
       <h2>Written Summary</h2>
