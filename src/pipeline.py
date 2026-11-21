@@ -26,13 +26,12 @@ from datetime import datetime
 import pandas as pd
 
 try:
-    from . import config, loaders, metrics, narrative, percentiles, validate
+    from . import config, loaders, metrics, percentiles, validate
     from .html_report import hitter_html_report, pitcher_html_report
 except ImportError:  # direct-script / non-package execution
     import config
     import loaders
     import metrics
-    import narrative
     import percentiles
     import validate
     from html_report import hitter_html_report, pitcher_html_report
@@ -283,25 +282,6 @@ def _validate_or_raise(df: pd.DataFrame, player_id: int) -> None:
         )
 
 
-def _narrative_paragraph(kind, player_id, start, end, gen_fn):
-    """Return the Claude scouting paragraph for a report, cached to disk.
-
-    The paragraph is a paid API call, so we cache it like the player pull:
-    completed ranges are written to data/processed/ (billed once per player+range,
-    even across restarts); a range ending today isn't cached (its data can change).
-    gen_fn (the actual API call) runs only on a cache miss.
-    """
-    path = config.PROCESSED_DIR / f"narrative_{kind}_{player_id}_{start}_{end}.txt"
-    if path.exists():
-        return path.read_text() or None
-
-    paragraph = gen_fn()
-    range_is_complete = datetime.strptime(end, "%Y-%m-%d").date() < datetime.now().date()
-    if paragraph and range_is_complete:
-        path.write_text(paragraph)
-    return paragraph
-
-
 def _pitcher_report(df, name, player_id, start, end) -> str:
     """Render the pitcher HTML from a one-pitcher DataFrame."""
     season = datetime.strptime(end, "%Y-%m-%d").year
@@ -316,12 +296,6 @@ def _pitcher_report(df, name, player_id, start, end) -> str:
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
 
-    narr = _build_narrative(
-        "pitcher", pctiles, player_id, start, end,
-        name=name, hand=throws_label(df),
-        sample=f"{len(df)} pitches, {friendly_range(start, end)}",
-    )
-
     return pitcher_html_report(
         arsenal, location, splits,
         pitcher_name=name,
@@ -329,7 +303,6 @@ def _pitcher_report(df, name, player_id, start, end) -> str:
         pitches=df,                                # enables the Visuals charts
         percentiles=pctiles,
         percentile_season=season,
-        narrative=narr,
     )
 
 
@@ -353,13 +326,6 @@ def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
 
-    narr = _build_narrative(
-        "hitter", pctiles, player_id, start, end,
-        name=name, hand=bats_label(df),
-        sample=f"{int(row['n_bbe'])} batted balls, {friendly_range(start, end)}",
-        profile=row,
-    )
-
     html = hitter_html_report(
         overall, platoon,
         hitter_name=name,
@@ -369,27 +335,8 @@ def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
         player_id=player_id,
         percentiles=pctiles,
         percentile_season=season,
-        narrative=narr,
     )
     return html, int(row["n_bbe"])
-
-
-def _build_narrative(kind, pctiles, player_id, start, end, *, name, hand, sample, profile=None):
-    """Assemble the narrative block: the deterministic grade line + the cached,
-    best-effort Claude paragraph. Returns None when there are no percentiles."""
-    if not pctiles:
-        return None
-    gl = narrative.grade_line(kind, pctiles)
-    if not gl:  # no gradeable metrics -> no scouting-summary block
-        return None
-    paragraph = _narrative_paragraph(
-        kind, player_id, start, end,
-        lambda: narrative.generate_paragraph(
-            kind, name=name, hand=hand, sample=sample,
-            percentiles=pctiles, profile=profile,
-        ),
-    )
-    return {"grade_line": gl, "paragraph": paragraph}
 
 
 def generate_report(

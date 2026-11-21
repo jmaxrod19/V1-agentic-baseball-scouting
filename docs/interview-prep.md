@@ -10,8 +10,8 @@ SQL specifically.
 "I built a baseball scouting analytics tool that turns raw Statcast and
 Baseball Savant data into professional-grade scouting reports — the kind a
 front office would actually use. It started as a script, grew into a deployed
-web app, and now includes an LLM-written narrative layer and a from-scratch
-biomechanics visualization backed by SQL."
+web app, and now includes a from-scratch biomechanics visualization backed
+by SQL."
 
 That's the whole pitch. Everything below is what you say on a follow-up.
 
@@ -24,7 +24,6 @@ Keep this short and plain-language — don't recite every library:
 - **DuckDB** for the SQL analysis layer (a good story — see below)
 - **matplotlib** for the visuals (deliberately static, not interactive)
 - **FastAPI** for the web app
-- **The Claude API** for the narrative-writing feature
 - **GitHub Actions** for CI, auto-deployed to Hugging Face Spaces
 
 ## "Walk me through the structure"

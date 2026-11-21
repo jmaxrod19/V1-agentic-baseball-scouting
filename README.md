@@ -7,7 +7,7 @@ charts — in one file.
 
 **🔗 [Try the live app](https://jmaxrod19-baseball-scouting.hf.space/)** · [Portfolio site & samples](https://jmaxrod19.github.io/V1-agentic-baseball-scouting/)
 
-> **Status:** V1 is shipped and deployed (git tag `v1.0`). **V2 is in active development** — hardening the foundation (tests, caching, validation) before layering on league context and an agentic, Claude-written scouting narrative.
+> **Status:** V1 is shipped and deployed (git tag `v1.0`). **V2 is in active development** — hardening the foundation (tests, caching, validation) before layering on league context and new visual features.
 
 ![Sample scouting report](docs/assets/report-screenshot.png)
 
@@ -21,7 +21,7 @@ charts — in one file.
   hard-hit%, barrel%, sweet-spot%, and expected stats on contact
   (**xwOBACON / xBACON**), split vs LHP/RHP.
 - Renders a self-contained, offline-viewable HTML report: summary cards, an
-  auto-generated narrative, and data tables (one file, prints cleanly to PDF).
+  auto-generated summary, and data tables (one file, prints cleanly to PDF).
 
 ## Setup
 
