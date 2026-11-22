@@ -150,3 +150,22 @@ def test_flight_paths_missing_column_raises():
     df = pd.DataFrame([_path_row()]).drop(columns=["release_pos_y"])
     with pytest.raises(ValueError, match="release_pos_y"):
         vaa.flight_paths(df)
+
+
+def test_average_pitch_is_one_row_of_column_means():
+    df = pd.DataFrame([_path_row(vy0=-128.0, plate_z=2.0), _path_row(vy0=-132.0, plate_z=3.0),
+                       _path_row(vy0=np.nan, plate_z=2.5)])
+    avg = vaa.average_pitch(df)
+    assert len(avg) == 1
+    assert avg.loc[0, "vy0"] == pytest.approx(-130.0)    # NaN skipped
+    assert avg.loc[0, "plate_z"] == pytest.approx(2.5)
+
+
+def test_average_pitch_angle_is_close_to_average_of_angles():
+    # For pitches that are similar, the angle of the "average pitch" and the
+    # average of the individual angles should agree closely.
+    rng = np.random.default_rng(2)
+    df = pd.DataFrame([_path_row(vy0=-130 + rng.normal(0, 2), vz0=-5 + rng.normal(0, 1),
+                                 az=-20 + rng.normal(0, 1.5)) for _ in range(200)])
+    assert vaa.compute_vaa(vaa.average_pitch(df)).iloc[0] == pytest.approx(
+        vaa.compute_vaa(df).mean(), abs=0.05)

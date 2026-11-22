@@ -6,8 +6,11 @@ disappear as we try ideas. Once a chart settles, it gets promoted into
 src/charts.py (which returns base64 PNGs for the HTML report). Until then these
 return a plain matplotlib Figure so a runner script or notebook can save/show it.
 
-Prototype A: flight_paths_3d. One pitcher's fastballs traced from release to
-the plate in 3D, each colored by its VAA.
+Prototype A1: flight_paths_3d. One pitcher's fastballs traced from release to
+the plate in 3D, each colored by its VAA. (Too busy: shelved, kept for reference.)
+
+Prototype A2: compare_to_league_3d. ONE line for the pitcher's average fastball
+next to ONE line for the league-average fastball.
 """
 
 from __future__ import annotations
@@ -134,3 +137,75 @@ def _column_mean(df: pd.DataFrame, col: str, default: float) -> float:
         return default
     value = pd.to_numeric(df[col], errors="coerce").mean()
     return default if pd.isna(value) else float(value)
+
+
+_PITCHER_COLOR = _STEEP    # crimson
+_LEAGUE_COLOR = "#4b5563"  # slate gray: the baseline should recede
+
+
+def compare_to_league_3d(
+    pitcher: pd.DataFrame,
+    league: pd.DataFrame,
+    pitcher_label: str,
+    league_label: str,
+    view: tuple[float, float] = (16.0, -58.0),
+    exaggeration: float = 3.5,
+) -> Figure:
+    """Prototype A2: the pitcher's average pitch vs the league's average pitch.
+
+    pitcher / league   Statcast rows (same pitch type; league should include the
+                       same handedness so left/right release side lines up).
+    *_label            Names for the legend, e.g. "Skubal" / "MLB average LHP".
+    exaggeration       Height/width stretch, as in flight_paths_3d.
+    """
+    lines = [
+        _summarize(pitcher, pitcher_label, _PITCHER_COLOR),
+        _summarize(league, league_label, _LEAGUE_COLOR),
+    ]
+
+    fig = plt.figure(figsize=(11, 6.5))
+    ax = fig.add_subplot(projection="3d")
+
+    for line in lines:
+        path = line["path"]
+        # Plot axes: matplotlib x = distance from plate, y = left/right, z = height.
+        ax.plot(
+            path[:, 1], path[:, 0], path[:, 2],
+            color=line["color"], linewidth=3.2, label=line["legend"],
+        )
+        ax.scatter(*[path[0, i] for i in (1, 0, 2)], color=line["color"], s=22)   # release
+        ax.scatter(*[path[-1, i] for i in (1, 0, 2)], color=line["color"], s=22)  # plate
+
+    _draw_strike_zone(ax, pitcher)
+
+    ax.set_xlim(56, 0)
+    ax.set_ylim(-4, 4)
+    ax.set_zlim(0, 8)
+    ax.set_box_aspect((56, 8 * exaggeration, 8 * exaggeration), zoom=1.25)
+    ax.view_init(elev=view[0], azim=view[1])
+    ax.set_xlabel("Distance from plate (ft)", labelpad=14)
+    ax.set_ylabel("Left / right (ft)", labelpad=10)
+    ax.set_zlabel("Height (ft)", labelpad=6)
+    ax.set_yticks([-3, 0, 3])
+    ax.set_zticks([0, 2, 4, 6, 8])
+    ax.tick_params(pad=3, labelsize=8)
+
+    fig.suptitle(f"{pitcher_label} vs {league_label}", fontsize=14, color=_INK, y=0.95)
+    ax.set_title(
+        f"Height and width drawn {exaggeration:g}x true scale, so angles look steeper than they are",
+        fontsize=9, color="#6b7280", pad=-4,
+    )
+    ax.legend(loc="upper left", fontsize=10, frameon=False)
+    return fig
+
+
+def _summarize(df: pd.DataFrame, label: str, color: str) -> dict:
+    """Everything one line of the chart needs: its path, color and legend text."""
+    angles = vaa.compute_vaa(df).dropna()
+    if angles.empty:
+        raise ValueError(f"compare_to_league_3d: no pitches with trajectory data for {label!r}.")
+    typical = vaa.average_pitch(df)
+    path = vaa.flight_paths(typical, n_points=80)[0]
+    plate_height = float(path[-1, 2])
+    legend = f"{label}: VAA {angles.mean():.1f}°  (n={len(angles)}, crosses plate at {plate_height:.1f} ft)"
+    return {"path": path, "color": color, "legend": legend}

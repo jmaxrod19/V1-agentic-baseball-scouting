@@ -43,3 +43,17 @@ def test_flight_paths_3d_raises_when_nothing_is_traceable():
     df["vz0"] = np.nan
     with pytest.raises(ValueError, match="no pitches"):
         vaa_charts.flight_paths_3d(df, "Test")
+
+
+def test_compare_to_league_3d_draws_two_lines():
+    fig = vaa_charts.compare_to_league_3d(_pitches(8), _pitches(30), "Pitcher", "League")
+    # two path lines + the strike-zone outline
+    assert len(fig.axes[0].lines) == 3
+    plt.close(fig)
+
+
+def test_compare_to_league_3d_raises_on_untraceable_side():
+    bad = _pitches()
+    bad["vz0"] = np.nan
+    with pytest.raises(ValueError, match="no pitches"):
+        vaa_charts.compare_to_league_3d(bad, _pitches(), "Pitcher", "League")

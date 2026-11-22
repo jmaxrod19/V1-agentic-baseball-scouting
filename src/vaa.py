@@ -12,6 +12,7 @@ Public functions:
     compute_vaa(df, plate_y=PLATE_FRONT_Y) -> pd.Series of degrees, row-aligned
     flight_paths(df, n_points=40)          -> (n_pitches, n_points, 3) array of
                                               x/y/z points, release to plate
+    average_pitch(df)                      -> one-row frame: the "typical" pitch
 
 The math is plain constant-acceleration physics (the same equations as a ball
 thrown in a high-school physics problem). Statcast fits each pitch with a
@@ -182,3 +183,16 @@ def flight_paths(df: pd.DataFrame, n_points: int = 40) -> np.ndarray:
     unusable = np.isnan(paths).any(axis=(1, 2))
     paths[unusable] = np.nan
     return paths
+
+
+def average_pitch(df: pd.DataFrame) -> pd.DataFrame:
+    """Collapse many pitches into ONE typical pitch (a one-row frame).
+
+    Averages every input flight_paths needs (speeds, accelerations, release
+    distance and plate location), skipping missing values. The result can be fed
+    straight to flight_paths or compute_vaa. Because the path model is built
+    from these numbers, the "average pitch" is a real, physically consistent
+    trajectory that passes through the average plate location.
+    """
+    _check_columns(df, _PATH_COLS, "average_pitch")
+    return pd.DataFrame([{c: _num(df, c).mean() for c in _PATH_COLS}])
