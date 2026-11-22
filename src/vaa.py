@@ -10,6 +10,8 @@ fastball sits closer to zero).
 
 Public functions:
     compute_vaa(df, plate_y=PLATE_FRONT_Y) -> pd.Series of degrees, row-aligned
+    flight_paths(df, n_points=40)          -> (n_pitches, n_points, 3) array of
+                                              x/y/z points, release to plate
 
 The math is plain constant-acceleration physics (the same equations as a ball
 thrown in a high-school physics problem). Statcast fits each pitch with a
@@ -37,23 +39,32 @@ PLATE_FRONT_Y: float = 17 / 12
 _REQUIRED_COLS: tuple[str, ...] = ("vy0", "vz0", "ay", "az")
 
 
-def compute_vaa(df: pd.DataFrame, plate_y: float = PLATE_FRONT_Y) -> pd.Series:
-    """Return each pitch's vertical approach angle in degrees (negative = descending).
-
-    Rows missing any needed input (or with physically impossible values) come
-    back as NaN rather than raising, so a few bad rows never sink a whole pull.
-    The result has the same index as `df`, so it can be assigned straight back
-    as a column. `df` itself is not modified.
-    """
-    missing = [c for c in _REQUIRED_COLS if c not in df.columns]
+def _check_columns(df: pd.DataFrame, needed: tuple[str, ...], who: str) -> None:
+    """Raise one readable error naming every missing column."""
+    missing = [c for c in needed if c not in df.columns]
     if missing:
-        raise ValueError(f"compute_vaa: missing column(s) {missing}.")
+        raise ValueError(f"{who}: missing column(s) {missing}.")
 
-    # Force plain floats so a stray string or None can't poison the math.
-    vy0 = pd.to_numeric(df["vy0"], errors="coerce")
-    vz0 = pd.to_numeric(df["vz0"], errors="coerce")
-    ay = pd.to_numeric(df["ay"], errors="coerce")
-    az = pd.to_numeric(df["az"], errors="coerce")
+
+def _num(df: pd.DataFrame, col: str) -> pd.Series:
+    """A column as plain floats; a stray string or None becomes NaN."""
+    return pd.to_numeric(df[col], errors="coerce")
+
+
+def _arrival_state(df: pd.DataFrame, plate_y: float) -> pd.DataFrame:
+    """Flight time and speeds at the moment each pitch reaches `plate_y`.
+
+    Returns a frame (same index as `df`) with columns:
+        flight_time  seconds from y = 50 ft to the plate
+        vy_final     speed toward the plate on arrival (negative)
+        vz_final     vertical speed on arrival (negative = falling)
+    Shared by compute_vaa (which only needs the angle) and flight_paths (which
+    needs the whole trajectory), so the physics lives in exactly one place.
+    """
+    vy0 = _num(df, "vy0")
+    vz0 = _num(df, "vz0")
+    ay = _num(df, "ay")
+    az = _num(df, "az")
 
     # How far the ball travels toward the plate, in feet (about 48.6 ft).
     distance = STATCAST_START_Y - plate_y
@@ -78,11 +89,96 @@ def compute_vaa(df: pd.DataFrame, plate_y: float = PLATE_FRONT_Y) -> pd.Series:
     # Step 3: vertical speed on arrival: vz_final = vz0 + az * time.
     vz_final = vz0 + az * flight_time
 
+    return pd.DataFrame(
+        {"flight_time": flight_time, "vy_final": vy_final, "vz_final": vz_final}
+    )
+
+
+def compute_vaa(df: pd.DataFrame, plate_y: float = PLATE_FRONT_Y) -> pd.Series:
+    """Return each pitch's vertical approach angle in degrees (negative = descending).
+
+    Rows missing any needed input (or with physically impossible values) come
+    back as NaN rather than raising, so a few bad rows never sink a whole pull.
+    The result has the same index as `df`, so it can be assigned straight back
+    as a column. `df` itself is not modified.
+    """
+    _check_columns(df, _REQUIRED_COLS, "compute_vaa")
+    arrival = _arrival_state(df, plate_y)
+
     # Step 4: the angle. atan2(opposite, adjacent) = atan2(vertical speed,
     # forward speed). vz_final is negative for a falling ball, so the angle comes
     # out negative. We negate vy_final only, because it is negative for every
     # pitch heading to the plate and we want the "forward" speed to be positive
     # (otherwise atan2 would return an angle near 180 degrees).
-    vaa = np.degrees(np.arctan2(vz_final, -vy_final))
+    vaa = np.degrees(np.arctan2(arrival["vz_final"], -arrival["vy_final"]))
 
     return vaa.rename("vaa")
+
+
+_PATH_COLS: tuple[str, ...] = (
+    "vx0", "vy0", "vz0", "ax", "ay", "az", "plate_x", "plate_z", "release_pos_y",
+)
+
+
+def flight_paths(df: pd.DataFrame, n_points: int = 40) -> np.ndarray:
+    """Trace every pitch from its release point to the front of the plate.
+
+    Returns an array shaped (n_pitches, n_points, 3). For pitch i, point j is
+    (x, y, z) in feet: x = left/right (catcher's view, + is the catcher's right),
+    y = distance from the plate (about 54 ft at release, 17/12 ft at the plate),
+    z = height. Rows with missing or impossible inputs are all-NaN, so row i
+    still lines up with row i of `df`.
+
+    How it works: we know exactly where Statcast says each pitch crossed the
+    plate (plate_x, plate_z), and we know its speed and acceleration there. With
+    constant acceleration, position at any other moment is
+        position = plate position + velocity_at_plate * s + 0.5 * accel * s^2
+    where s is the (negative) time relative to arrival. So we anchor the path at
+    the plate and walk it backwards in time to the release point.
+    """
+    _check_columns(df, _PATH_COLS, "flight_paths")
+    arrival = _arrival_state(df, PLATE_FRONT_Y)
+
+    vx0, vy0 = _num(df, "vx0"), _num(df, "vy0")
+    ax, ay, az = _num(df, "ax"), _num(df, "ay"), _num(df, "az")
+    flight_time = arrival["flight_time"]
+
+    # Sideways and vertical velocity on arrival at the plate.
+    vx_final = vx0 + ax * flight_time
+    vz_final = arrival["vz_final"]
+
+    # When was release? The y-position follows y(t) = 50 + vy0*t + 0.5*ay*t^2
+    # (t = 0 at y = 50 ft), so release is the t where y(t) = release_pos_y.
+    # Solve that quadratic. Of its two roots we want the one closest to zero.
+    # errstate: a bad row (negative under the square root, or ay == 0) should
+    # quietly become NaN, not print a warning for every such row.
+    c = STATCAST_START_Y - _num(df, "release_pos_y")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        root = np.sqrt(vy0**2 - 4 * (0.5 * ay) * c)
+        t_a = (-vy0 + root) / ay
+        t_b = (-vy0 - root) / ay
+    release_time = t_a.where(t_a.abs() < t_b.abs(), t_b)
+
+    # A grid of moments for every pitch: row i runs from its release time to
+    # its arrival time in n_points even steps. Shape (n_pitches, n_points).
+    fraction = np.linspace(0.0, 1.0, n_points)
+    span = (flight_time - release_time).to_numpy()[:, None]
+    t = release_time.to_numpy()[:, None] + fraction[None, :] * span
+
+    # Time relative to arrival (<= 0): the "s" in the docstring formula.
+    s = t - flight_time.to_numpy()[:, None]
+
+    x = _num(df, "plate_x").to_numpy()[:, None] + vx_final.to_numpy()[:, None] * s \
+        + 0.5 * ax.to_numpy()[:, None] * s**2
+    z = _num(df, "plate_z").to_numpy()[:, None] + vz_final.to_numpy()[:, None] * s \
+        + 0.5 * az.to_numpy()[:, None] * s**2
+    y = STATCAST_START_Y + vy0.to_numpy()[:, None] * t + 0.5 * ay.to_numpy()[:, None] * t**2
+
+    paths = np.stack([x, y, z], axis=2)
+
+    # A pitch missing only one input (say vz0) would still get valid x and y but
+    # a NaN z, which makes a confusing half-drawn line. Make the whole row NaN
+    # so "this pitch can't be traced" is one clear signal for the chart code.
+    unusable = np.isnan(paths).any(axis=(1, 2))
+    paths[unusable] = np.nan
+    return paths

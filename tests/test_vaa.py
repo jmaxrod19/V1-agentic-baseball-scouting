@@ -100,3 +100,53 @@ def test_string_values_are_coerced_not_crashing():
     out = vaa.compute_vaa(df)
     assert not np.isnan(out.iloc[0])
     assert np.isnan(out.iloc[1])
+
+
+# ---------------------------------------------------------------------------
+# flight_paths: the full release-to-plate trajectory used by the 3D chart.
+# ---------------------------------------------------------------------------
+
+def _path_row(**overrides) -> dict:
+    """A pitch with every column flight_paths needs (a realistic fastball)."""
+    row = {
+        "vx0": 6.0, "vy0": -130.0, "vz0": -5.0,
+        "ax": -10.0, "ay": 25.0, "az": -20.0,
+        "plate_x": 0.3, "plate_z": 2.6, "release_pos_y": 54.0,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_flight_paths_shape_and_endpoints():
+    df = pd.DataFrame([_path_row(), _path_row(plate_x=-0.5, plate_z=3.1)])
+    paths = vaa.flight_paths(df, n_points=25)
+    assert paths.shape == (2, 25, 3)
+    # Last point is exactly where Statcast says the pitch crossed the plate.
+    np.testing.assert_allclose(paths[0, -1], [0.3, vaa.PLATE_FRONT_Y, 2.6], atol=1e-9)
+    np.testing.assert_allclose(paths[1, -1], [-0.5, vaa.PLATE_FRONT_Y, 3.1], atol=1e-9)
+    # First point starts at the release distance.
+    np.testing.assert_allclose(paths[:, 0, 1], 54.0, atol=1e-9)
+
+
+def test_flight_paths_slope_at_plate_matches_vaa():
+    # Two independent routes to the same angle must agree: the VAA formula, and
+    # the slope of the last tiny step of the traced path (rise / run).
+    df = pd.DataFrame([_path_row(), _path_row(az=-28.0, plate_z=1.8)])
+    paths = vaa.flight_paths(df, n_points=4000)
+    dz = paths[:, -1, 2] - paths[:, -2, 2]
+    dy = paths[:, -2, 1] - paths[:, -1, 1]       # y shrinks toward the plate
+    slope_deg = np.degrees(np.arctan2(dz, dy))
+    np.testing.assert_allclose(slope_deg, vaa.compute_vaa(df).to_numpy(), atol=0.01)
+
+
+def test_flight_paths_bad_rows_are_nan_and_stay_aligned():
+    df = pd.DataFrame([_path_row(), _path_row(vz0=np.nan), _path_row()])
+    paths = vaa.flight_paths(df, n_points=10)
+    assert np.isfinite(paths[0]).all() and np.isfinite(paths[2]).all()
+    assert np.isnan(paths[1]).all()
+
+
+def test_flight_paths_missing_column_raises():
+    df = pd.DataFrame([_path_row()]).drop(columns=["release_pos_y"])
+    with pytest.raises(ValueError, match="release_pos_y"):
+        vaa.flight_paths(df)
