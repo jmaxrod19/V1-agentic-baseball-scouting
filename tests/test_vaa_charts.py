@@ -57,3 +57,66 @@ def test_compare_to_league_3d_raises_on_untraceable_side():
     bad["vz0"] = np.nan
     with pytest.raises(ValueError, match="no pitches"):
         vaa_charts.compare_to_league_3d(bad, _pitches(), "Pitcher", "League")
+
+
+# ---------------------------------------------------------------------------
+# Prototype A3: side view + tiles. The text logic is pure functions, so test it directly.
+# ---------------------------------------------------------------------------
+
+def _prof(**kw) -> dict:
+    base = {"n": 50, "vaa": -4.6, "release_z": 5.8, "extension": 6.5, "arm_angle": 39.0}
+    base.update(kw)
+    return base
+
+
+def test_format_height():
+    assert vaa_charts._format_height(74) == "6'2\""
+    assert vaa_charts._format_height(74.6) == "6'3\""
+    assert vaa_charts._format_height(None) == "n/a"
+    assert vaa_charts._format_height(float("nan")) == "n/a"
+
+
+def test_delta_arrows_and_ties():
+    assert vaa_charts._delta(6.0, 5.5, 1, " ft") == "▲ 0.5 ft"
+    assert vaa_charts._delta(5.0, 6.0, 1, " ft") == "▼ 1.0 ft"
+    assert vaa_charts._delta(5.01, 5.0, 1, " ft") == "about the same"
+    assert vaa_charts._delta(float("nan"), 5.0, 1, " ft") == ""
+
+
+def test_takeaway_describes_release_and_angle():
+    text = vaa_charts._takeaway(_prof(release_z=4.7, extension=7.0, vaa=-3.6), _prof())
+    assert text == "Releases 1.1 ft lower and 0.5 ft closer to the plate than average; approaches 1.0° flatter."
+
+
+def test_takeaway_calls_small_differences_average():
+    text = vaa_charts._takeaway(_prof(release_z=5.9, extension=6.4, vaa=-4.7), _prof())
+    assert text == "Release point is close to league average; approaches at about the league-average angle."
+
+
+def test_takeaway_steeper_and_farther():
+    text = vaa_charts._takeaway(_prof(extension=5.9, vaa=-5.5), _prof())
+    assert "0.6 ft farther from the plate" in text and "0.9° steeper" in text
+
+
+def test_tiles_survive_missing_arm_angle_and_height():
+    tiles = vaa_charts._tiles(_prof(arm_angle=float("nan")), _prof(arm_angle=float("nan")), None, None)
+    by_label = {t["label"]: t for t in tiles}
+    assert by_label["HEIGHT"]["value"] == "n/a"
+    assert by_label["ARM ANGLE"]["value"] == "n/a"
+    assert by_label["ARM ANGLE"]["note"] == "not in this data"
+    assert by_label["EXTENSION"]["value"] == "6.5 ft"
+
+
+def test_side_view_with_profile_draws_with_and_without_optional_columns():
+    df = _pitches(10)
+    df["release_pos_z"] = 5.9
+    df["release_extension"] = 6.4
+    df["arm_angle"] = 40.0
+    fig = vaa_charts.side_view_with_profile(df, _pitches(30).assign(
+        release_pos_z=5.8, release_extension=6.5, arm_angle=39.0), "P", "L", 74, 74.5)
+    assert len(fig.axes) == 1 + 1 + 4            # header + side view + four tiles
+    plt.close(fig)
+
+    # Older pulls: no release_pos_z / extension / arm_angle columns at all.
+    fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
+    plt.close(fig)

@@ -2,11 +2,14 @@
 
 Usage (from the repo root):
     .venv/bin/python vaa_prototype.py --pitcher "Skubal"
-    .venv/bin/python vaa_prototype.py --pitcher "Burns, Chase" --pitch-type FF
+    .venv/bin/python vaa_prototype.py --pitcher "Ryan, Joe" --style 3d
 
 It reads a league-wide Statcast CSV from data/raw/, takes one pitcher's pitches
 of one type, compares his average to the league average for pitchers who throw
-with the same hand, draws Prototype A2, and saves a PNG in data/processed/.
+with the same hand, and saves a PNG in data/processed/.
+
+Styles:  side (default)  Prototype A3: flat side view + release-profile tiles
+         3d              Prototype A2: one line vs one line, in 3D
 Throwaway glue: the real logic lives in src/vaa.py and src/vaa_charts.py.
 """
 
@@ -20,6 +23,7 @@ import matplotlib.pyplot as plt
 from src import loaders, vaa, vaa_charts
 
 ROOT = Path(__file__).resolve().parent
+HEIGHT_CACHE = ROOT / "data/processed/pitcher_heights.csv"
 
 
 def main() -> None:
@@ -27,6 +31,7 @@ def main() -> None:
     parser.add_argument("--csv", default=str(ROOT / "data/raw/chase_burns_2026-06-01_2026-06-28.csv"))
     parser.add_argument("--pitcher", required=True, help='Part of the name, e.g. "Burns, Chase" or "Skubal".')
     parser.add_argument("--pitch-type", default="FF", help="Statcast code, default FF (four-seam).")
+    parser.add_argument("--style", choices=["side", "3d"], default="side")
     parser.add_argument("--out", default=str(ROOT / "data/processed"))
     args = parser.parse_args()
 
@@ -51,18 +56,38 @@ def main() -> None:
 
     mine_vaa = vaa.compute_vaa(mine).dropna()
     league_vaa = vaa.compute_vaa(league).dropna()
-    print(f"{name}: {len(mine_vaa)} {args.pitch_type}, mean VAA {mine_vaa.mean():.2f} deg, "
-          f"mean plate height {mine['plate_z'].mean():.2f} ft")
-    print(f"League {hand}HP: {len(league_vaa)} {args.pitch_type}, mean VAA {league_vaa.mean():.2f} deg, "
-          f"mean plate height {league['plate_z'].mean():.2f} ft")
+    print(f"{name}: {len(mine_vaa)} {args.pitch_type}, mean VAA {mine_vaa.mean():.2f} deg")
+    print(f"League {hand}HP: {len(league_vaa)} {args.pitch_type}, mean VAA {league_vaa.mean():.2f} deg")
 
-    fig = vaa_charts.compare_to_league_3d(
-        mine, league, f"{name} {args.pitch_type}", f"MLB average {hand}HP {args.pitch_type}",
-    )
+    # Statcast names are "Last, First"; read better as "First Last".
+    last, _, first = name.partition(", ")
+    display_name = f"{first} {last}".strip()
+    pitcher_label = f"{display_name} {args.pitch_type}"
+    league_label = f"MLB average {hand}HP {args.pitch_type}"
+
+    if args.style == "3d":
+        fig = vaa_charts.compare_to_league_3d(mine, league, pitcher_label, league_label)
+        stem = "a2"
+    else:
+        # Listed heights from the MLB API, cached on disk so repeat runs are instant.
+        pitcher_id = int(mine["pitcher"].iloc[0])
+        heights = loaders.cached_player_heights(
+            [pitcher_id, *league["pitcher"].dropna().astype(int).unique()], HEIGHT_CACHE,
+        )
+        height_in = heights.get(pitcher_id)
+        # League height averaged over PITCHES (like the other league numbers), not over pitchers.
+        league_height_in = league["pitcher"].map(heights).mean()
+        print(f"Heights found for {len(heights)} pitchers; {name}: {height_in} in, league avg {league_height_in:.1f} in")
+        fig = vaa_charts.side_view_with_profile(
+            mine, league, pitcher_label, league_label,
+            pitcher_height_in=height_in, league_height_in=league_height_in,
+        )
+        stem = "a3"
+
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = name.lower().replace(",", "").replace(" ", "_")
-    out_path = out_dir / f"vaa_proto_a2_{slug}_{args.pitch_type.lower()}.png"
+    out_path = out_dir / f"vaa_proto_{stem}_{slug}_{args.pitch_type.lower()}.png"
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     print(f"Saved {out_path}")
