@@ -35,6 +35,18 @@ STATCAST_START_Y: float = 50.0
 # at the back of the plate) is the common convention for VAA.
 PLATE_FRONT_Y: float = 17 / 12
 
+# Where plate_x / plate_z are recorded. Savant's CSV docs: the FRONT of the plate
+# through 2025, the MIDDLE of the plate (8.5 in from the back tip) from 2026 on.
+PLATE_MIDDLE_Y: float = 8.5 / 12
+
+
+def plate_reference_y(df: pd.DataFrame) -> pd.Series:
+    """For each row, the distance at which its plate_x / plate_z were measured."""
+    year = _num(df, "game_year") if "game_year" in df.columns else pd.Series(np.nan, index=df.index)
+    # NaN >= 2026 is False, so data without a year keeps the older front-of-plate rule.
+    return pd.Series(np.where(year >= 2026, PLATE_MIDDLE_Y, PLATE_FRONT_Y), index=df.index)
+
+
 # Columns the calculation reads. Checked up front so a missing column fails
 # with a readable message instead of a bare KeyError deep inside the math.
 _REQUIRED_COLS: tuple[str, ...] = ("vy0", "vz0", "ay", "az")
@@ -131,7 +143,8 @@ def flight_paths(df: pd.DataFrame, n_points: int = 40) -> np.ndarray:
     still lines up with row i of `df`.
 
     How it works: we know exactly where Statcast says each pitch crossed the
-    plate (plate_x, plate_z), and we know its speed and acceleration there. With
+    plate (plate_x, plate_z; see plate_reference_y for the depth), and we know
+    its speed and acceleration there. With
     constant acceleration, position at any other moment is
         position = plate position + velocity_at_plate * s + 0.5 * accel * s^2
     where s is the (negative) time relative to arrival. So we anchor the path at
@@ -139,14 +152,16 @@ def flight_paths(df: pd.DataFrame, n_points: int = 40) -> np.ndarray:
     """
     _check_columns(df, _PATH_COLS, "flight_paths")
     arrival = _arrival_state(df, PLATE_FRONT_Y)
+    reference = _arrival_state(df, plate_reference_y(df))   # where plate_x/z were measured
 
     vx0, vy0 = _num(df, "vx0"), _num(df, "vy0")
     ax, ay, az = _num(df, "ax"), _num(df, "ay"), _num(df, "az")
     flight_time = arrival["flight_time"]
+    reference_time = reference["flight_time"]
 
-    # Sideways and vertical velocity on arrival at the plate.
-    vx_final = vx0 + ax * flight_time
-    vz_final = arrival["vz_final"]
+    # Sideways and vertical velocity at the moment plate_x / plate_z were recorded.
+    vx_final = vx0 + ax * reference_time
+    vz_final = reference["vz_final"]
 
     # When was release? The y-position follows y(t) = 50 + vy0*t + 0.5*ay*t^2
     # (t = 0 at y = 50 ft), so release is the t where y(t) = release_pos_y.
@@ -166,8 +181,8 @@ def flight_paths(df: pd.DataFrame, n_points: int = 40) -> np.ndarray:
     span = (flight_time - release_time).to_numpy()[:, None]
     t = release_time.to_numpy()[:, None] + fraction[None, :] * span
 
-    # Time relative to arrival (<= 0): the "s" in the docstring formula.
-    s = t - flight_time.to_numpy()[:, None]
+    # Time relative to the recorded plate location: the "s" in the docstring formula.
+    s = t - reference_time.to_numpy()[:, None]
 
     x = _num(df, "plate_x").to_numpy()[:, None] + vx_final.to_numpy()[:, None] * s \
         + 0.5 * ax.to_numpy()[:, None] * s**2
@@ -195,4 +210,7 @@ def average_pitch(df: pd.DataFrame) -> pd.DataFrame:
     trajectory that passes through the average plate location.
     """
     _check_columns(df, _PATH_COLS, "average_pitch")
-    return pd.DataFrame([{c: _num(df, c).mean() for c in _PATH_COLS}])
+    row = {c: _num(df, c).mean() for c in _PATH_COLS}
+    if "game_year" in df.columns:
+        row["game_year"] = _num(df, "game_year").max()   # decides the measuring depth
+    return pd.DataFrame([row])

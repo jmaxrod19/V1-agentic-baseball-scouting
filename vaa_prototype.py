@@ -1,16 +1,13 @@
-"""Runner for the VAA prototypes: pick a pitcher, get a picture.
+"""Runner for the fastball VAA chart: pick a pitcher and a season, get a picture.
 
 Usage (from the repo root):
     .venv/bin/python vaa_prototype.py --pitcher "Skubal"
-    .venv/bin/python vaa_prototype.py --pitcher "Ryan, Joe" --style 3d
+    .venv/bin/python vaa_prototype.py --pitcher "Ryan, Joe" --plate-height 3.0
+    .venv/bin/python vaa_prototype.py --pitcher 669373 --season 2025 --csv data/raw/statcast_2025.csv
 
-It reads a league-wide Statcast CSV from data/raw/, takes one pitcher's pitches
-of one type, compares his average to the league average for pitchers who throw
-with the same hand, and saves a PNG in data/processed/.
-
-Styles:  side (default)  Prototype A5: verdict, one side view, three release cards
-         3d              Prototype A2: one line vs one line, in 3D
-Throwaway glue: the real logic lives in src/vaa.py and src/vaa_charts.py.
+The CSV must be LEAGUE-WIDE pitch-level Statcast data, because the benchmark is
+built from it. Four-seam fastballs only. The PNG goes to data/processed/.
+The real logic lives in src/vaa_model.py (numbers) and src/vaa_charts.py (drawing).
 """
 
 from __future__ import annotations
@@ -19,81 +16,62 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pandas as pd
 
-from src import loaders, vaa, vaa_charts
+from src import loaders, vaa_charts, vaa_model
 
 ROOT = Path(__file__).resolve().parent
 HEIGHT_CACHE = ROOT / "data/processed/pitcher_heights.csv"
-# Plain words for the chart; any other pitch code is shown as-is.
-PITCH_NAMES = {"FF": "four-seam fastball", "SI": "sinker", "FC": "cutter"}
+DEFAULT_CSV = ROOT / "data/raw/chase_burns_2026-06-01_2026-06-28.csv"   # league-wide, June 2026
+
+
+def find_pitcher(df: pd.DataFrame, query: str) -> int:
+    """Turn a name fragment (or a numeric MLBAM id) into one pitcher id."""
+    if query.isdigit():
+        return int(query)
+    matches = df[df["player_name"].str.contains(query, case=False, na=False, regex=False)]
+    people = matches[["pitcher", "player_name"]].drop_duplicates()
+    if people.empty:
+        raise SystemExit(f"No pitcher matching {query!r} in this data.")
+    if len(people) > 1:
+        raise SystemExit(f"{query!r} matches several pitchers: {people.to_dict('records')}")
+    return int(people["pitcher"].iloc[0])
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Draw a VAA prototype for one pitcher.")
-    parser.add_argument("--csv", default=str(ROOT / "data/raw/chase_burns_2026-06-01_2026-06-28.csv"))
-    parser.add_argument("--pitcher", required=True, help='Part of the name, e.g. "Burns, Chase" or "Skubal".')
-    parser.add_argument("--pitch-type", default="FF", help="Statcast code, default FF (four-seam).")
-    parser.add_argument("--style", choices=["side", "3d"], default="side")
+    parser = argparse.ArgumentParser(description="Draw the four-seam VAA chart for one pitcher.")
+    parser.add_argument("--pitcher", required=True, help='Name fragment ("Skubal") or MLBAM id.')
+    parser.add_argument("--season", type=int, help="Year; default is the latest in the data.")
+    parser.add_argument("--csv", default=str(DEFAULT_CSV), help="League-wide Statcast CSV.")
+    parser.add_argument("--plate-height", type=float, default=vaa_model.DEFAULT_PLATE_HEIGHT,
+                        help="Height both modeled pitches cross the front of the plate (ft).")
     parser.add_argument("--out", default=str(ROOT / "data/processed"))
     args = parser.parse_args()
 
     df = loaders.load_statcast_csv(args.csv)
+    pitcher_id = find_pitcher(df, args.pitcher)
+    try:
+        c = vaa_model.compare_fastball(df, pitcher_id, args.season, args.plate_height)
+    except ValueError as problem:
+        raise SystemExit(str(problem))
 
-    # Case-insensitive "contains" match so a last name is enough.
-    matches = df[df["player_name"].str.contains(args.pitcher, case=False, na=False, regex=False)]
-    if matches.empty:
-        raise SystemExit(f"No pitcher matching {args.pitcher!r} in {args.csv}")
-    names = matches["player_name"].unique()
-    if len(names) > 1:
-        raise SystemExit(f"{args.pitcher!r} matches several pitchers: {list(names)}. Be more specific.")
-    name = names[0]
-
-    same_type = df[df["pitch_type"] == args.pitch_type]
-    mine = same_type[same_type["player_name"] == name]
-
-    # League baseline: same pitch type, same throwing hand. Mixing hands would
-    # compare a lefty's release side to a blend of both sides.
-    hand = mine["p_throws"].mode().iloc[0]
-    league = same_type[same_type["p_throws"] == hand]
-
-    mine_vaa = vaa.compute_vaa(mine).dropna()
-    league_vaa = vaa.compute_vaa(league).dropna()
-    print(f"{name}: {len(mine_vaa)} {args.pitch_type}, mean VAA {mine_vaa.mean():.2f} deg")
-    print(f"League {hand}HP: {len(league_vaa)} {args.pitch_type}, mean VAA {league_vaa.mean():.2f} deg")
-
-    # Statcast names are "Last, First"; read better as "First Last".
-    last, _, first = name.partition(", ")
-    display_name = f"{first} {last}".strip()
-    pitcher_label = f"{display_name} {args.pitch_type}"
-    league_label = f"MLB average {hand}HP {args.pitch_type}"
-
-    if args.style == "3d":
-        fig = vaa_charts.compare_to_league_3d(mine, league, pitcher_label, league_label)
-        stem = "a2"
-    else:
-        # Listed heights from the MLB API, cached on disk so repeat runs are instant.
-        pitcher_id = int(mine["pitcher"].iloc[0])
-        heights = loaders.cached_player_heights(
-            [pitcher_id, *league["pitcher"].dropna().astype(int).unique()], HEIGHT_CACHE,
-        )
-        height_in = heights.get(pitcher_id)
-        # League height averaged over PITCHES (like the other league numbers), not over pitchers.
-        league_height_in = league["pitcher"].map(heights).mean()
-        print(f"Heights found for {len(heights)} pitchers; {name}: {height_in} in, league avg {league_height_in:.1f} in")
-        pitch_name = PITCH_NAMES.get(args.pitch_type, args.pitch_type)
-        hand_word = "right" if hand == "R" else "left"
-        fig = vaa_charts.side_view_with_profile(
-            mine, league, display_name, f"average {hand_word}-handed {pitch_name}",
-            pitcher_height_in=height_in, league_height_in=league_height_in,
-        )
-        stem = "a5"
+    # Listed heights from the MLB API, cached on disk so repeat runs are instant.
+    heights = loaders.cached_player_heights([pitcher_id, *c.pitcher_ids], HEIGHT_CACHE)
+    league_height = pd.Series(c.pitcher_ids).map(heights).mean()
+    fig = vaa_charts.fastball_vaa_chart(c, heights.get(pitcher_id), league_height)
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
-    slug = name.lower().replace(",", "").replace(" ", "_")
-    out_path = out_dir / f"vaa_proto_{stem}_{slug}_{args.pitch_type.lower()}.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
+    slug = c.name.lower().replace(".", "").replace(" ", "_")
+    out_path = out_dir / f"vaa_proto_a6_{slug}_{c.season}_ff.png"
+    fig.savefig(out_path, dpi=150, facecolor="white")
     plt.close(fig)
+
+    print(f"{c.name} {c.season}: {c.pitcher.pitches} FF vs {c.league.pitches} {c.hand}HP FF")
+    print(f"Observed VAA {c.pitcher.observed_vaa:.2f} (MLB {c.league.observed_vaa:.2f}), "
+          f"VAA AA {c.pitcher.vaa_aa:+.2f} -> {c.classification}")
+    print(f"Modeled at {c.comparison_height:g} ft: {c.pitcher.modeled.vaa:.2f} vs "
+          f"{c.league.modeled.vaa:.2f}")
     print(f"Saved {out_path}")
 
 

@@ -5,7 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import vaa, vaa_charts, vaa_figures
+from src import vaa, vaa_charts, vaa_figures, vaa_model
+from tests.test_vaa_model import _league
 
 
 def _pitches(n: int = 5) -> pd.DataFrame:
@@ -60,54 +61,19 @@ def test_compare_to_league_3d_raises_on_untraceable_side():
 
 
 # ---------------------------------------------------------------------------
-# Prototype A5: verdict, side view, three cards. The text logic is pure functions, so test it directly.
+# Prototype A6: modeled paths, tangents, true-scale diagram, cards.
 # ---------------------------------------------------------------------------
 
-def _prof(**kw) -> dict:
-    base = {"n": 50, "vaa": -4.6, "release_z": 5.8, "extension": 6.5, "arm_angle": 39.0}
-    base.update(kw)
-    return base
+@pytest.fixture(scope="module")
+def comparison():
+    return vaa_model.compare_fastball(_league(), 1)
 
 
-def test_format_height():
-    assert vaa_charts._format_height(74) == "6'2\""
-    assert vaa_charts._format_height(74.6) == "6'3\""
-    assert vaa_charts._format_height(None) == "n/a"
-    assert vaa_charts._format_height(float("nan")) == "n/a"
-
-
-def test_compare_words():
-    args = (0.3, 1, " ft", "higher", "lower")
-    assert vaa_charts._compare(6.0, 5.5, *args) == "0.5 ft higher"
-    assert vaa_charts._compare(4.6, 5.7, *args) == "1.1 ft lower"
-    assert vaa_charts._compare(5.1, 5.0, *args) == "about average"
-    assert vaa_charts._compare(float("nan"), 5.0, *args) == ""
-
-
-def test_verdict_words():
-    assert vaa_charts._verdict(_prof(vaa=-3.6), _prof()) == "Flatter than average"
-    assert vaa_charts._verdict(_prof(vaa=-5.5), _prof()) == "Steeper than average"
-    assert vaa_charts._verdict(_prof(vaa=-4.7), _prof()) == "About average"
-
-
-def test_cards_survive_a_missing_arm_angle():
-    cards = vaa_charts._cards(_prof(arm_angle=float("nan")), _prof())
-    by_title = {c["title"]: c for c in cards}
-    assert list(by_title) == ["RELEASE HEIGHT", "EXTENSION", "ARM ANGLE"]
-    assert by_title["ARM ANGLE"]["value"] == "n/a"
-    assert by_title["ARM ANGLE"]["compare"] == ""
-    assert by_title["EXTENSION"]["value"] == "6.5 ft"
-
-
-def test_side_view_with_profile_draws_with_and_without_optional_columns():
-    df = _pitches(10).assign(release_pos_z=5.9, release_extension=6.4, arm_angle=40.0, p_throws="L")
-    league = _pitches(30).assign(release_pos_z=5.8, release_extension=6.5, arm_angle=39.0)
-    fig = vaa_charts.side_view_with_profile(df, league, "P", "L", 74, 74.5)
-    assert len(fig.axes) == 1 + 1 + 3            # header, side view, three cards
-    plt.close(fig)
-
-    # Older pulls: no release_pos_z / extension / arm_angle columns at all.
-    fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
+@pytest.fixture
+def figure(comparison):
+    fig = vaa_charts.fastball_vaa_chart(comparison, 74, 74.5)
+    fig.canvas.draw()                       # settles the equal-aspect axes
+    yield fig
     plt.close(fig)
 
 
@@ -116,26 +82,60 @@ def _lines(fig, gid: str) -> list:
     return fig.findobj(lambda artist: artist.get_gid() == gid)
 
 
-def test_side_view_pitch_lines_are_straight():
-    fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
-    lines = _lines(fig, "pitch-line")
-    assert len(lines) == 2                              # pitcher and league
-    assert all(len(line.get_xdata()) == 2 for line in lines)   # two points = straight
-    plt.close(fig)
+def test_paths_start_at_each_release_point_and_share_the_crossing_height(comparison, figure):
+    league_line, pitcher_line = _lines(figure, "pitch-path")
+    for line, side in ((league_line, comparison.league), (pitcher_line, comparison.pitcher)):
+        y, z = line.get_xdata(), line.get_ydata()
+        assert (y[0], z[0]) == pytest.approx((side.state["release_y"], side.state["release_z"]))
+        assert (y[-1], z[-1]) == pytest.approx((vaa.PLATE_FRONT_Y, 2.75))
+        assert len(y) > 2                   # a curve, not a straight segment
 
 
-def test_angle_panel_slopes_are_the_real_vaa():
-    pitcher, league = _pitches(10), _pitches(30)
-    fig = vaa_charts.side_view_with_profile(pitcher, league, "P", "L")
-    drawn = []
-    for line in _lines(fig, "angle-line"):
-        (x0, x1), (y0, y1) = line.get_xdata(), line.get_ydata()
-        drawn.append(np.degrees(np.arctan((y1 - y0) / (x1 - x0))))
-    expected = [vaa.compute_vaa(league).mean(), vaa.compute_vaa(pitcher).mean()]
-    np.testing.assert_allclose(drawn, expected, atol=1e-9)
-    plt.close(fig)
+def test_tangent_lines_have_the_arrival_slope(comparison, figure):
+    for line, side in zip(_lines(figure, "tangent-line"), (comparison.league, comparison.pitcher)):
+        (y0, y1), (z0, z1) = line.get_xdata(), line.get_ydata()
+        angle = -np.degrees(np.arctan2(z1 - z0, y1 - y0))
+        assert angle == pytest.approx(side.modeled.vaa)
 
 
+def test_angle_diagram_is_true_scale_on_screen(comparison, figure):
+    lines = _lines(figure, "angle-line")
+    for line, side in zip(lines, (comparison.league, comparison.pitcher)):
+        # Measure the angle in PIXELS, as a viewer would see it.
+        (x0, y0), (x1, y1) = line.axes.transData.transform(line.get_xydata())
+        on_screen = -np.degrees(np.arctan2(y0 - y1, x1 - x0))
+        assert on_screen == pytest.approx(side.modeled.vaa, abs=0.02)
+
+
+def test_cards_carry_every_metric_and_survive_missing_arm_angle(comparison):
+    cards = vaa_charts._cards(comparison)
+    assert [card["title"] for card in cards] == [
+        "RELEASE HEIGHT", "EXTENSION", "ARM ANGLE", "VELOCITY", "VERTICAL BREAK"]
+    assert cards[0]["effect"].endswith("flatter")
+    assert cards[2]["effect"] == "not a direct input"
+
+    blind = vaa_model.compare_fastball(_league().drop(columns=["arm_angle", "sz_bot", "sz_top"]), 1)
+    assert vaa_charts._cards(blind)[2]["value"] == "n/a"
+    plt.close(vaa_charts.fastball_vaa_chart(blind))          # no heights, no zone: still draws
+
+
+def test_reason_names_the_biggest_factor(comparison):
+    assert "a lower release (+" in vaa_charts._reason(comparison)
+
+
+def test_signed_and_effect_text():
+    assert vaa_charts._signed(0.94) == "+0.9°"
+    assert vaa_charts._signed(-0.02) == "0.0°"
+    assert vaa_charts._effect_text(0.01) == "no real change"
+    assert vaa_charts._effect_text(-0.31) == "-0.3° steeper"
+
+
+def test_format_height():
+    assert vaa_charts._format_height(74) == "6'2\""
+    assert vaa_charts._format_height(None) == "n/a"
+
+
+# --- figurine geometry ----------------------------------------------------------
 def test_arm_end_matches_the_arm_angle_and_hand():
     shoulder_x, level = vaa_figures.FRONT_SHOULDER_HALF, vaa_figures.FRONT_SHOULDER_Z
     for hand, side in (("R", -1), ("L", 1)):            # righty shows on the viewer's left
