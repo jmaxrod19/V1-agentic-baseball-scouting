@@ -160,3 +160,25 @@ def test_mound_height():
     assert vaa_figures.mound_height(60.5) == pytest.approx(10 / 12)   # at the rubber
     assert vaa_figures.mound_height(54.0) == pytest.approx(4 / 12)
     assert vaa_figures.mound_height(10.0) == 0                        # flat field
+
+
+def test_capsule_ends_have_the_requested_radii():
+    outline = vaa_figures.capsule((0.0, 0.0), (10.0, 0.0), 2.0, 1.0)
+    assert outline[:, 0].min() == pytest.approx(-2.0, abs=0.02)    # thick end
+    assert outline[:, 0].max() == pytest.approx(11.0, abs=0.02)    # thin end
+    assert np.abs(outline[:, 1]).max() <= 2.0 + 1e-9
+
+
+def test_capsule_with_swallowed_circle_is_just_the_big_circle():
+    outline = vaa_figures.capsule((0.0, 0.0), (0.1, 0.0), 2.0, 0.5)
+    np.testing.assert_allclose(np.hypot(outline[:, 0], outline[:, 1]), 2.0)
+
+
+def test_pitchers_ball_sits_at_the_release_point_even_when_stretched():
+    fig, ax = plt.subplots()
+    vaa_figures.draw_pitcher_side(ax, (54.0, 5.8), 60.5, 6.2, "#cc3552", stretch=2.1)
+    (ball,) = [patch for patch in ax.patches if patch.get_gid() == "ball"]
+    points = ball.get_xy()[:-1]                  # last point repeats the first
+    center = (points.min(axis=0) + points.max(axis=0)) / 2
+    np.testing.assert_allclose(center, [54.0, 5.8], atol=0.02)
+    plt.close(fig)

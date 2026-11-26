@@ -379,12 +379,12 @@ def side_view_with_profile(
     figure_height_ft = (pitcher_height_in if height_known else _DEFAULT_HEIGHT_IN) / 12
     _draw_side_view(side, pitcher, pitcher_path, league_path,
                     pitcher_label, league_label, p, figure_height_ft)
-    _note_vertical_stretch(side, fig_w, fig_h)
+    _note_vertical_stretch(side)
 
     # The angle panel gets three columns; the arm figurine sits above the arm tile.
     angle = fig.add_subplot(grid[2, 0:3])
     _draw_angle_panel(angle, p, lg, pitcher_label)
-    _note_vertical_stretch(angle, fig_w, fig_h)
+    _note_vertical_stretch(angle)
     _draw_arm_panel(fig.add_subplot(grid[2, 3]), hand, p, lg)
 
     for column, tile in enumerate(_tiles(p, lg, pitcher_height_in, league_height_in)):
@@ -440,8 +440,10 @@ def _draw_side_view(ax, pitcher, pitcher_path, league_path, pitcher_label, leagu
 
     # The people.
     release = (float(pitcher_path[0, 1]), float(pitcher_path[0, 2]))
-    vaa_figures.draw_pitcher_side(ax, release, RUBBER_Y, figure_height_ft, _PITCHER_COLOR)
-    vaa_figures.draw_batter_side(ax, _FIGURE_FILL)
+    stretch = _vertical_stretch(ax)       # limits are set above, so this is final
+    vaa_figures.draw_pitcher_side(ax, release, RUBBER_Y, figure_height_ft,
+                                  _PITCHER_COLOR, stretch)
+    vaa_figures.draw_batter_side(ax, _FIGURE_FILL, stretch)
 
     # STRAIGHT lines from the release point to where the pitch crosses the plate.
     # Only the two end points are used; the curve in between is deliberately dropped.
@@ -453,7 +455,8 @@ def _draw_side_view(ax, pitcher, pitcher_path, league_path, pitcher_label, leagu
         ends_z = [path[0, 2], path[-1, 2]]
         ax.plot(ends_y, ends_z, color=color, linewidth=2.6, label=label,
                 zorder=3, gid="pitch-line")
-        ax.scatter(ends_y, ends_z, color=color, s=40, zorder=4,
+        first_dot = 1 if color == _PITCHER_COLOR else 0   # his ball is drawn already
+        ax.scatter(ends_y[first_dot:], ends_z[first_dot:], color=color, s=40, zorder=4,
                    edgecolors="white", linewidths=1.2)
 
     # Release height and extension drawn like a dimension diagram.
@@ -557,16 +560,21 @@ def _draw_arm_panel(ax, hand: str, p: dict, lg: dict) -> None:
             ha="center", va="top")
 
 
-def _note_vertical_stretch(ax, fig_w: float, fig_h: float) -> None:
-    """Say how much taller than true scale the picture is drawn, from the real layout."""
+def _vertical_stretch(ax) -> float:
+    """How many times taller than true scale this axes draws things."""
     box = ax.get_position()                                  # fractions of the figure
+    fig_w, fig_h = ax.figure.get_size_inches()
     x_range = abs(ax.get_xlim()[1] - ax.get_xlim()[0])
     y_range = abs(ax.get_ylim()[1] - ax.get_ylim()[0])
     inches_per_ft_x = box.width * fig_w / x_range
     inches_per_ft_y = box.height * fig_h / y_range
-    stretch = inches_per_ft_y / inches_per_ft_x
-    ax.text(0.005, 0.99, f"Height drawn {stretch:.1f}× true scale", transform=ax.transAxes,
-            fontsize=8, color=_MUTED, ha="left", va="top")
+    return float(inches_per_ft_y / inches_per_ft_x)
+
+
+def _note_vertical_stretch(ax) -> None:
+    """Say how much taller than true scale the picture is drawn, from the real layout."""
+    ax.text(0.005, 0.99, f"Height drawn {_vertical_stretch(ax):.1f}× true scale",
+            transform=ax.transAxes, fontsize=8, color=_MUTED, ha="left", va="top")
 
 
 def _draw_tile(ax, tile: dict) -> None:
