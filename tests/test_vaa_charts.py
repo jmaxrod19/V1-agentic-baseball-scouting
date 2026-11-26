@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src import vaa_charts
+from src import vaa, vaa_charts, vaa_figures
 
 
 def _pitches(n: int = 5) -> pd.DataFrame:
@@ -60,7 +60,7 @@ def test_compare_to_league_3d_raises_on_untraceable_side():
 
 
 # ---------------------------------------------------------------------------
-# Prototype A3: side view + tiles. The text logic is pure functions, so test it directly.
+# Prototype A4: side view, figurines, angle panels, tiles. The text logic is pure functions, so test it directly.
 # ---------------------------------------------------------------------------
 
 def _prof(**kw) -> dict:
@@ -114,9 +114,49 @@ def test_side_view_with_profile_draws_with_and_without_optional_columns():
     df["arm_angle"] = 40.0
     fig = vaa_charts.side_view_with_profile(df, _pitches(30).assign(
         release_pos_z=5.8, release_extension=6.5, arm_angle=39.0), "P", "L", 74, 74.5)
-    assert len(fig.axes) == 1 + 1 + 4            # header + side view + four tiles
+    assert len(fig.axes) == 1 + 1 + 2 + 4        # header, side view, angle + arm panels, tiles
     plt.close(fig)
 
     # Older pulls: no release_pos_z / extension / arm_angle columns at all.
     fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
     plt.close(fig)
+
+
+def _lines(ax, gid: str) -> list:
+    """The plotted lines tagged with `gid`."""
+    return [line for line in ax.lines if line.get_gid() == gid]
+
+
+def test_side_view_pitch_lines_are_straight():
+    fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
+    lines = _lines(fig.axes[1], "pitch-line")
+    assert len(lines) == 2                              # pitcher and league
+    assert all(len(line.get_xdata()) == 2 for line in lines)   # two points = straight
+    plt.close(fig)
+
+
+def test_angle_panel_slopes_are_the_real_vaa():
+    pitcher, league = _pitches(10), _pitches(30)
+    fig = vaa_charts.side_view_with_profile(pitcher, league, "P", "L")
+    drawn = []
+    for line in _lines(fig.axes[2], "angle-line"):
+        (x0, x1), (y0, y1) = line.get_xdata(), line.get_ydata()
+        drawn.append(np.degrees(np.arctan((y1 - y0) / (x1 - x0))))
+    expected = [vaa.compute_vaa(league).mean(), vaa.compute_vaa(pitcher).mean()]
+    np.testing.assert_allclose(drawn, expected, atol=1e-9)
+    plt.close(fig)
+
+
+def test_arm_end_matches_the_arm_angle_and_hand():
+    shoulder_x, level = vaa_figures.FRONT_SHOULDER_HALF, vaa_figures.FRONT_SHOULDER_Z
+    for hand, side in (("R", -1), ("L", 1)):            # righty shows on the viewer's left
+        x, z = vaa_figures.arm_end(hand, 30.0)
+        assert np.sign(x) == side
+        assert np.degrees(np.arctan2(z - level, abs(x) - shoulder_x)) == pytest.approx(30.0)
+    assert vaa_figures.arm_end("R", -10.0)[1] < level   # submarine: hand below the shoulder
+
+
+def test_mound_height():
+    assert vaa_figures.mound_height(60.5) == pytest.approx(10 / 12)   # at the rubber
+    assert vaa_figures.mound_height(54.0) == pytest.approx(4 / 12)
+    assert vaa_figures.mound_height(10.0) == 0                        # flat field

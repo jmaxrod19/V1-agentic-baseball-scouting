@@ -8,7 +8,7 @@ It reads a league-wide Statcast CSV from data/raw/, takes one pitcher's pitches
 of one type, compares his average to the league average for pitchers who throw
 with the same hand, and saves a PNG in data/processed/.
 
-Styles:  side (default)  Prototype A3: flat side view + release-profile tiles
+Styles:  side (default)  Prototype A4: side view with figurines + release-profile tiles
          3d              Prototype A2: one line vs one line, in 3D
 Throwaway glue: the real logic lives in src/vaa.py and src/vaa_charts.py.
 """
@@ -82,7 +82,7 @@ def main() -> None:
             mine, league, pitcher_label, league_label,
             pitcher_height_in=height_in, league_height_in=league_height_in,
         )
-        stem = "a3"
+        stem = "a4"
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

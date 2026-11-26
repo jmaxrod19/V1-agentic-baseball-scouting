@@ -12,9 +12,10 @@ the plate in 3D, each colored by its VAA. (Too busy: shelved, kept for reference
 Prototype A2: compare_to_league_3d. ONE line for the pitcher's average fastball
 next to ONE line for the league-average fastball.
 
-Prototype A3: side_view_with_profile. A flat side view (where VAA is a plain
-slope) plus four tiles for the release traits that drive it: height, release
-height, extension, arm angle. Each tile compares the pitcher to the league.
+Prototype A4: side_view_with_profile. A flat side view with figurines and
+STRAIGHT release-to-plate lines, a straight-line panel for the true angle at the
+plate (VAA), a front-view figurine for arm angle, and four tiles for height,
+release height, extension and arm angle.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch, Rectangle
 
-from src import vaa
+from src import vaa, vaa_figures
 
 # Colors borrowed from src/charts.py: crimson = fastball, cyan = breaking.
 _STEEP = "#cc3552"   # steep descent (more negative VAA)
@@ -145,7 +146,7 @@ def _column_mean(df: pd.DataFrame, col: str, default: float) -> float:
 
 
 _PITCHER_COLOR = _STEEP    # crimson
-_LEAGUE_COLOR = "#4b5563"  # slate gray: the baseline should recede
+_LEAGUE_COLOR = "#6b7280"  # gray: the baseline recedes, still distinct for colorblind readers
 
 
 def compare_to_league_3d(
@@ -217,7 +218,7 @@ def _summarize(df: pd.DataFrame, label: str, color: str) -> dict:
 
 
 # ===========================================================================
-# Prototype A3: side view + profile tiles
+# Prototype A4: side view with figurines + angle panels + tiles
 # ===========================================================================
 
 RUBBER_Y = 60.5            # feet from the plate to the front of the pitching rubber
@@ -226,6 +227,8 @@ _TILE_FILL = "#f3f4f6"
 _MUTED = "#6b7280"
 _MIN_REL_GAP = 0.3         # ft: smaller release/extension differences count as "same"
 _MIN_VAA_GAP = 0.3         # degrees: smaller angle differences count as "same"
+_DEFAULT_HEIGHT_IN = 74    # figurine size when the listed height is unknown
+_FIGURE_FILL = "#d1d5db"   # light gray for people who are only context
 
 
 def _mean_or_nan(df: pd.DataFrame, col: str) -> float:
@@ -351,31 +354,49 @@ def side_view_with_profile(
     pitcher_height_in: float | None = None,
     league_height_in: float | None = None,
 ) -> Figure:
-    """Prototype A3: flat side view of both average pitches + four profile tiles.
+    """Prototype A4: side view with figurines, angle panels and profile tiles.
 
     pitcher_height_in / league_height_in are listed heights in inches. Leave them
-    None if unknown: the height tile then shows "n/a" and the chart still draws.
+    None if unknown: the height tile then shows "n/a", the figurine uses a
+    typical size, and the chart still draws.
     """
     p = _profile(pitcher, pitcher_label)
     lg = _profile(league, league_label)
     pitcher_path, league_path = _avg_path(pitcher), _avg_path(league)
+    hand = _throwing_hand(pitcher)
 
-    fig_w, fig_h = 11.0, 7.0
+    fig_w, fig_h = 12.0, 10.0
     fig = plt.figure(figsize=(fig_w, fig_h))
     grid = fig.add_gridspec(
-        3, 4, height_ratios=[0.6, 3.4, 1.6], hspace=0.2, wspace=0.10,
-        left=0.05, right=0.97, top=0.97, bottom=0.03,
+        4, 4, height_ratios=[0.55, 3.0, 2.1, 1.55], hspace=0.30, wspace=0.10,
+        left=0.05, right=0.97, top=0.98, bottom=0.02,
     )
 
     _draw_header(fig.add_subplot(grid[0, :]), pitcher_label, p, lg, _takeaway(p, lg))
 
     side = fig.add_subplot(grid[1, :])
-    _draw_side_view(side, pitcher, pitcher_path, league_path, pitcher_label, league_label, p, lg)
+    height_known = pitcher_height_in is not None and not pd.isna(pitcher_height_in)
+    figure_height_ft = (pitcher_height_in if height_known else _DEFAULT_HEIGHT_IN) / 12
+    _draw_side_view(side, pitcher, pitcher_path, league_path,
+                    pitcher_label, league_label, p, figure_height_ft)
     _note_vertical_stretch(side, fig_w, fig_h)
 
+    # The angle panel gets three columns; the arm figurine sits above the arm tile.
+    angle = fig.add_subplot(grid[2, 0:3])
+    _draw_angle_panel(angle, p, lg, pitcher_label)
+    _note_vertical_stretch(angle, fig_w, fig_h)
+    _draw_arm_panel(fig.add_subplot(grid[2, 3]), hand, p, lg)
+
     for column, tile in enumerate(_tiles(p, lg, pitcher_height_in, league_height_in)):
-        _draw_tile(fig.add_subplot(grid[2, column]), tile)
+        _draw_tile(fig.add_subplot(grid[3, column]), tile)
     return fig
+
+
+def _throwing_hand(df: pd.DataFrame) -> str:
+    """"R" or "L" (most common value); "R" if the column is absent or empty."""
+    if "p_throws" not in df.columns or df["p_throws"].dropna().empty:
+        return "R"
+    return str(df["p_throws"].mode().iloc[0])
 
 
 def _draw_header(ax, label: str, p: dict, lg: dict, takeaway: str) -> None:
@@ -385,58 +406,80 @@ def _draw_header(ax, label: str, p: dict, lg: dict, takeaway: str) -> None:
             va="center", transform=ax.transAxes)
     ax.text(1.0, 0.78, f"VAA {p['vaa']:.1f}°", fontsize=19, fontweight="bold",
             color=_PITCHER_COLOR, va="center", ha="right", transform=ax.transAxes)
-    ax.text(1.0, 0.22, f"MLB average {lg['vaa']:.1f}°", fontsize=11, color=_MUTED,
+    ax.text(1.0, 0.12, f"MLB average {lg['vaa']:.1f}°", fontsize=11, color=_MUTED,
             va="center", ha="right", transform=ax.transAxes)
-    ax.text(0.0, 0.22, takeaway, fontsize=11.5, color="#374151",
+    ax.text(0.0, 0.12, takeaway, fontsize=11.5, color="#374151",
             va="center", transform=ax.transAxes)
 
 
-def _draw_side_view(ax, pitcher, pitcher_path, league_path, pitcher_label, league_label, p, lg) -> None:
+def _draw_side_view(ax, pitcher, pitcher_path, league_path, pitcher_label, league_label,
+                    p, figure_height_ft) -> None:
     """Flat side view: pitcher on the left, plate on the right, height up."""
-    x_far, x_near, y_top = RUBBER_Y + 2.5, -1.5, 8.2
+    x_far, x_near, y_bottom, y_top = RUBBER_Y + 4.0, -2.5, -1.25, 8.4
     ax.set_xlim(x_far, x_near)            # reversed: far (pitcher) on the left
-    ax.set_ylim(-0.4, y_top)
-    ax.axhspan(-0.4, 0, color=_GROUND, zorder=0)
+    ax.set_ylim(y_bottom, y_top)
+
+    # Ground and mound as one filled shape under the ground-height curve.
+    ground_y = np.linspace(x_near, x_far, 400)
+    ax.fill_between(ground_y, y_bottom, vaa_figures.mound_height(ground_y),
+                    color=_GROUND, linewidth=0, zorder=0.5)
+    ax.axhline(0, color="#a8a29e", linewidth=0.8, zorder=0.55)    # field level
 
     # Strike zone as it looks from the side: a thin box at the plate.
     bottom = _column_mean(pitcher, "sz_bot", default=1.5)
     top = _column_mean(pitcher, "sz_top", default=3.5)
     ax.add_patch(Rectangle((0, bottom), vaa.PLATE_FRONT_Y, top - bottom,
-                           facecolor="#93c5fd", alpha=0.35, edgecolor="none", zorder=1))
-    ax.text(vaa.PLATE_FRONT_Y / 2, top + 0.12, "zone", fontsize=8, color=_MUTED, ha="center")
+                           facecolor="#93c5fd", alpha=0.45, edgecolor="none", zorder=1))
+    ax.text(vaa.PLATE_FRONT_Y + 0.5, bottom, "zone", fontsize=8, color=_MUTED,
+            ha="right", va="bottom")
 
-    # Pitching rubber.
-    ax.plot([RUBBER_Y, RUBBER_Y], [0, 0.35], color=_INK, linewidth=3, solid_capstyle="butt")
-    ax.text(RUBBER_Y, -0.2, "rubber", fontsize=8, color=_MUTED, ha="center", va="center")
+    # Pitching rubber, sitting on top of the mound.
+    mound_top = float(vaa_figures.mound_height(RUBBER_Y))
+    ax.plot([RUBBER_Y - 0.25, RUBBER_Y + 0.25], [mound_top, mound_top], color=_INK,
+            linewidth=3.5, solid_capstyle="butt", zorder=2.6)
 
+    # The people.
+    release = (float(pitcher_path[0, 1]), float(pitcher_path[0, 2]))
+    vaa_figures.draw_pitcher_side(ax, release, RUBBER_Y, figure_height_ft, _PITCHER_COLOR)
+    vaa_figures.draw_batter_side(ax, _FIGURE_FILL)
+
+    # STRAIGHT lines from the release point to where the pitch crosses the plate.
+    # Only the two end points are used; the curve in between is deliberately dropped.
     for path, color, label in (
         (league_path, _LEAGUE_COLOR, league_label),
         (pitcher_path, _PITCHER_COLOR, pitcher_label),
     ):
-        ax.plot(path[:, 1], path[:, 2], color=color, linewidth=3.2, label=label, zorder=3)
-        ax.scatter([path[0, 1], path[-1, 1]], [path[0, 2], path[-1, 2]],
-                   color=color, s=34, zorder=4)
+        ends_y = [path[0, 1], path[-1, 1]]
+        ends_z = [path[0, 2], path[-1, 2]]
+        ax.plot(ends_y, ends_z, color=color, linewidth=2.6, label=label,
+                zorder=3, gid="pitch-line")
+        ax.scatter(ends_y, ends_z, color=color, s=40, zorder=4,
+                   edgecolors="white", linewidths=1.2)
 
-    # Release height + extension drawn like a dimension diagram: a dashed drop
-    # line from the release point to the ground, and a double arrow along the
-    # ground-level from the rubber to that drop line.
-    rel_y, rel_z = pitcher_path[0, 1], pitcher_path[0, 2]
-    ax.plot([rel_y, rel_y], [0, rel_z], color=_PITCHER_COLOR, linestyle=(0, (3, 3)),
-            linewidth=1.2, zorder=2)
-    ax.text(rel_y + 0.8, rel_z * 0.62, f"release\n{rel_z:.1f} ft", fontsize=9,
-            color=_PITCHER_COLOR, ha="right", va="center")
+    # Release height and extension drawn like a dimension diagram.
+    rel_y, rel_z = release
+    dim_y = rel_y - 1.2                       # a bit to the plate side of the hand
+    ax.annotate("", xy=(dim_y, rel_z), xytext=(dim_y, 0), zorder=2.8,
+                arrowprops=dict(arrowstyle="<->", color=_INK, linewidth=1.0,
+                                shrinkA=0, shrinkB=0))
+    ax.text(dim_y - 0.5, 0.75, f"release height {rel_z:.1f} ft", fontsize=9,
+            color=_INK, ha="left", va="center", zorder=5)
 
-    bracket_z = 1.05
-    ax.annotate("", xy=(RUBBER_Y, bracket_z), xytext=(rel_y, bracket_z),
-                arrowprops=dict(arrowstyle="<->", color=_PITCHER_COLOR, linewidth=1.3))
-    # Anchored just past the rubber and growing toward home plate, so the words
-    # never run into the dashed drop line even for short extensions.
-    ax.text(RUBBER_Y + 1.0, bracket_z - 0.15,
-            f"extension {_fmt(p['extension'], 1, ' ft')}", fontsize=9,
-            color=_PITCHER_COLOR, ha="left", va="top")
+    bracket_z = -0.55                         # below field level, clear of the mound
+    ax.annotate("", xy=(RUBBER_Y, bracket_z), xytext=(rel_y, bracket_z), zorder=2.8,
+                arrowprops=dict(arrowstyle="<->", color=_INK, linewidth=1.0,
+                                shrinkA=0, shrinkB=0))
+    ax.text(rel_y - 0.5, bracket_z, f"extension {_fmt(p['extension'], 1, ' ft')}",
+            fontsize=9, color=_INK, ha="left", va="center", zorder=5)
 
-    ax.set_xlabel("Feet from home plate", color=_MUTED, fontsize=9)
+    ax.text(0.5, 0.025,
+            "Lines run straight from release to plate. The real pitch curves, "
+            "so their slope is not the VAA.",
+            transform=ax.transAxes, fontsize=8, color=_MUTED, ha="center", va="bottom")
+
+    ax.set_xlabel("Feet from home plate", color=_MUTED, fontsize=9, labelpad=2)
     ax.set_yticks([0, 2, 4, 6, 8])
+    ax.set_xticks([60, 50, 40, 30, 20, 10, 0])
     ax.tick_params(colors=_MUTED, labelsize=8)
     for edge in ("top", "right"):
         ax.spines[edge].set_visible(False)
@@ -444,6 +487,74 @@ def _draw_side_view(ax, pitcher, pitcher_path, league_path, pitcher_label, leagu
         ax.spines[edge].set_color("#d1d5db")
     ax.set_ylabel("Height (ft)", color=_MUTED, fontsize=9)
     ax.legend(loc="upper right", frameon=False, fontsize=10)
+
+
+def _draw_angle_panel(ax, p: dict, lg: dict, pitcher_label: str) -> None:
+    """The VAA itself as two straight lines arriving at the same spot.
+
+    Both lines end at (0, 0), "the plate", and rise going back toward the mound.
+    The horizontal axis is one arbitrary unit of distance, so a line's height at
+    the left edge is simply tan(angle).
+    """
+    rise = {name: float(np.tan(np.radians(-side["vaa"]))) for name, side in (("p", p), ("lg", lg))}
+    top = max(rise.values()) * 1.35
+    ax.set_xlim(-1.42, 0.06)               # room on the left for the labels
+    ax.set_ylim(-top * 0.16, top)
+    ax.axis("off")
+    ax.set_title("Angle at the plate (VAA)", loc="left", fontsize=11,
+                 fontweight="bold", color=_INK, pad=2)
+
+    ax.plot([-1.0, 0.04], [0, 0], color=_MUTED, linewidth=1.0, linestyle=(0, (4, 3)))
+    ax.text(-1.02, 0, "level", fontsize=9, color=_MUTED, ha="right", va="center")
+
+    # Labels sit at the left end of each line. If the two angles are nearly the
+    # same, push the labels apart so they stay readable.
+    label_z = dict(rise)
+    min_gap = top * 0.13
+    if abs(rise["p"] - rise["lg"]) < min_gap:
+        middle = (rise["p"] + rise["lg"]) / 2
+        direction = 1 if rise["p"] >= rise["lg"] else -1
+        label_z["p"] = middle + direction * min_gap / 2
+        label_z["lg"] = middle - direction * min_gap / 2
+
+    for key, side, color, name in (
+        ("lg", lg, _LEAGUE_COLOR, "MLB avg"),
+        ("p", p, _PITCHER_COLOR, pitcher_label),
+    ):
+        ax.plot([-1.0, 0.0], [rise[key], 0.0], color=color, linewidth=3.0,
+                solid_capstyle="round", gid="angle-line")
+        # The number is in plain ink; the little dot beside it carries the color.
+        ax.text(-1.06, label_z[key], f"{name}  {side['vaa']:.1f}°", fontsize=10,
+                color=_INK, ha="right", va="center")
+        ax.scatter([-1.03], [label_z[key]], color=color, s=30)
+
+    ax.scatter([0], [0], color=_INK, s=45, zorder=5)
+    ax.text(0.0, -top * 0.06, "plate", fontsize=9, color=_MUTED, ha="center", va="top")
+
+
+def _draw_arm_panel(ax, hand: str, p: dict, lg: dict) -> None:
+    """Front-view figurine with the pitcher's arm angle over the league's."""
+    ax.set_xlim(-3.6, 3.6)
+    ax.set_ylim(-0.2, 7.0)
+    ax.set_aspect("equal")                 # equal scales: the arm angle is TRUE here
+    ax.axis("off")
+    ax.set_title("Arm angle (catcher's view)", fontsize=11, fontweight="bold",
+                 color=_INK, pad=2)
+
+    arms = [(side["arm_angle"], color) for side, color in
+            ((lg, _LEAGUE_COLOR), (p, _PITCHER_COLOR)) if not pd.isna(side["arm_angle"])]
+    vaa_figures.draw_pitcher_front(ax, hand, arms, _FIGURE_FILL)
+    if pd.isna(p["arm_angle"]):
+        ax.text(0.0, 6.4, "not in this data", fontsize=9, color=_MUTED, ha="center")
+
+    # A dashed level line from the throwing shoulder: this is what 0 degrees means.
+    direction = -1 if hand == "R" else 1
+    start = direction * vaa_figures.FRONT_SHOULDER_HALF
+    level = vaa_figures.FRONT_SHOULDER_Z
+    ax.plot([start, start + direction * 2.5], [level, level], color=_MUTED,
+            linewidth=1.0, linestyle=(0, (3, 3)), zorder=0.5)
+    ax.text(start + direction * 2.5, level - 0.15, "0°", fontsize=8, color=_MUTED,
+            ha="center", va="top")
 
 
 def _note_vertical_stretch(ax, fig_w: float, fig_h: float) -> None:
