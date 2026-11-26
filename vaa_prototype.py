@@ -8,7 +8,7 @@ It reads a league-wide Statcast CSV from data/raw/, takes one pitcher's pitches
 of one type, compares his average to the league average for pitchers who throw
 with the same hand, and saves a PNG in data/processed/.
 
-Styles:  side (default)  Prototype A4: side view with figurines + release-profile tiles
+Styles:  side (default)  Prototype A5: verdict, one side view, three release cards
          3d              Prototype A2: one line vs one line, in 3D
 Throwaway glue: the real logic lives in src/vaa.py and src/vaa_charts.py.
 """
@@ -24,6 +24,8 @@ from src import loaders, vaa, vaa_charts
 
 ROOT = Path(__file__).resolve().parent
 HEIGHT_CACHE = ROOT / "data/processed/pitcher_heights.csv"
+# Plain words for the chart; any other pitch code is shown as-is.
+PITCH_NAMES = {"FF": "four-seam fastball", "SI": "sinker", "FC": "cutter"}
 
 
 def main() -> None:
@@ -78,11 +80,13 @@ def main() -> None:
         # League height averaged over PITCHES (like the other league numbers), not over pitchers.
         league_height_in = league["pitcher"].map(heights).mean()
         print(f"Heights found for {len(heights)} pitchers; {name}: {height_in} in, league avg {league_height_in:.1f} in")
+        pitch_name = PITCH_NAMES.get(args.pitch_type, args.pitch_type)
+        hand_word = "right" if hand == "R" else "left"
         fig = vaa_charts.side_view_with_profile(
-            mine, league, pitcher_label, league_label,
+            mine, league, display_name, f"average {hand_word}-handed {pitch_name}",
             pitcher_height_in=height_in, league_height_in=league_height_in,
         )
-        stem = "a4"
+        stem = "a5"
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

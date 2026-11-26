@@ -60,7 +60,7 @@ def test_compare_to_league_3d_raises_on_untraceable_side():
 
 
 # ---------------------------------------------------------------------------
-# Prototype A4: side view, figurines, angle panels, tiles. The text logic is pure functions, so test it directly.
+# Prototype A5: verdict, side view, three cards. The text logic is pure functions, so test it directly.
 # ---------------------------------------------------------------------------
 
 def _prof(**kw) -> dict:
@@ -76,45 +76,34 @@ def test_format_height():
     assert vaa_charts._format_height(float("nan")) == "n/a"
 
 
-def test_delta_arrows_and_ties():
-    assert vaa_charts._delta(6.0, 5.5, 1, " ft") == "▲ 0.5 ft"
-    assert vaa_charts._delta(5.0, 6.0, 1, " ft") == "▼ 1.0 ft"
-    assert vaa_charts._delta(5.01, 5.0, 1, " ft") == "about the same"
-    assert vaa_charts._delta(float("nan"), 5.0, 1, " ft") == ""
+def test_compare_words():
+    args = (0.3, 1, " ft", "higher", "lower")
+    assert vaa_charts._compare(6.0, 5.5, *args) == "0.5 ft higher"
+    assert vaa_charts._compare(4.6, 5.7, *args) == "1.1 ft lower"
+    assert vaa_charts._compare(5.1, 5.0, *args) == "about average"
+    assert vaa_charts._compare(float("nan"), 5.0, *args) == ""
 
 
-def test_takeaway_describes_release_and_angle():
-    text = vaa_charts._takeaway(_prof(release_z=4.7, extension=7.0, vaa=-3.6), _prof())
-    assert text == "Releases 1.1 ft lower and 0.5 ft closer to the plate than average; approaches 1.0° flatter."
+def test_verdict_words():
+    assert vaa_charts._verdict(_prof(vaa=-3.6), _prof()) == "Flatter than average"
+    assert vaa_charts._verdict(_prof(vaa=-5.5), _prof()) == "Steeper than average"
+    assert vaa_charts._verdict(_prof(vaa=-4.7), _prof()) == "About average"
 
 
-def test_takeaway_calls_small_differences_average():
-    text = vaa_charts._takeaway(_prof(release_z=5.9, extension=6.4, vaa=-4.7), _prof())
-    assert text == "Release point is close to league average; approaches at about the league-average angle."
-
-
-def test_takeaway_steeper_and_farther():
-    text = vaa_charts._takeaway(_prof(extension=5.9, vaa=-5.5), _prof())
-    assert "0.6 ft farther from the plate" in text and "0.9° steeper" in text
-
-
-def test_tiles_survive_missing_arm_angle_and_height():
-    tiles = vaa_charts._tiles(_prof(arm_angle=float("nan")), _prof(arm_angle=float("nan")), None, None)
-    by_label = {t["label"]: t for t in tiles}
-    assert by_label["HEIGHT"]["value"] == "n/a"
-    assert by_label["ARM ANGLE"]["value"] == "n/a"
-    assert by_label["ARM ANGLE"]["note"] == "not in this data"
-    assert by_label["EXTENSION"]["value"] == "6.5 ft"
+def test_cards_survive_a_missing_arm_angle():
+    cards = vaa_charts._cards(_prof(arm_angle=float("nan")), _prof())
+    by_title = {c["title"]: c for c in cards}
+    assert list(by_title) == ["RELEASE HEIGHT", "EXTENSION", "ARM ANGLE"]
+    assert by_title["ARM ANGLE"]["value"] == "n/a"
+    assert by_title["ARM ANGLE"]["compare"] == ""
+    assert by_title["EXTENSION"]["value"] == "6.5 ft"
 
 
 def test_side_view_with_profile_draws_with_and_without_optional_columns():
-    df = _pitches(10)
-    df["release_pos_z"] = 5.9
-    df["release_extension"] = 6.4
-    df["arm_angle"] = 40.0
-    fig = vaa_charts.side_view_with_profile(df, _pitches(30).assign(
-        release_pos_z=5.8, release_extension=6.5, arm_angle=39.0), "P", "L", 74, 74.5)
-    assert len(fig.axes) == 1 + 1 + 2 + 4        # header, side view, angle + arm panels, tiles
+    df = _pitches(10).assign(release_pos_z=5.9, release_extension=6.4, arm_angle=40.0, p_throws="L")
+    league = _pitches(30).assign(release_pos_z=5.8, release_extension=6.5, arm_angle=39.0)
+    fig = vaa_charts.side_view_with_profile(df, league, "P", "L", 74, 74.5)
+    assert len(fig.axes) == 1 + 1 + 3            # header, side view, three cards
     plt.close(fig)
 
     # Older pulls: no release_pos_z / extension / arm_angle columns at all.
@@ -122,14 +111,14 @@ def test_side_view_with_profile_draws_with_and_without_optional_columns():
     plt.close(fig)
 
 
-def _lines(ax, gid: str) -> list:
-    """The plotted lines tagged with `gid`."""
-    return [line for line in ax.lines if line.get_gid() == gid]
+def _lines(fig, gid: str) -> list:
+    """Every plotted line in the figure tagged with `gid`, including inset panels."""
+    return fig.findobj(lambda artist: artist.get_gid() == gid)
 
 
 def test_side_view_pitch_lines_are_straight():
     fig = vaa_charts.side_view_with_profile(_pitches(10), _pitches(30), "P", "L")
-    lines = _lines(fig.axes[1], "pitch-line")
+    lines = _lines(fig, "pitch-line")
     assert len(lines) == 2                              # pitcher and league
     assert all(len(line.get_xdata()) == 2 for line in lines)   # two points = straight
     plt.close(fig)
@@ -139,7 +128,7 @@ def test_angle_panel_slopes_are_the_real_vaa():
     pitcher, league = _pitches(10), _pitches(30)
     fig = vaa_charts.side_view_with_profile(pitcher, league, "P", "L")
     drawn = []
-    for line in _lines(fig.axes[2], "angle-line"):
+    for line in _lines(fig, "angle-line"):
         (x0, x1), (y0, y1) = line.get_xdata(), line.get_ydata()
         drawn.append(np.degrees(np.arctan((y1 - y0) / (x1 - x0))))
     expected = [vaa.compute_vaa(league).mean(), vaa.compute_vaa(pitcher).mean()]

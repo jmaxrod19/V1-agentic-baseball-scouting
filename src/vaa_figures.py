@@ -24,8 +24,6 @@ from matplotlib.patches import Polygon
 _MOUND_Y = [50.0, 54.0, 60.0, 62.0, 68.0]
 _MOUND_Z = [0.0, 4 / 12, 10 / 12, 10 / 12, 0.0]
 
-_LEATHER = "#8b5e3c"      # gloves
-_WOOD = "#c8a27a"         # bat
 
 
 def mound_height(y):
@@ -182,7 +180,7 @@ def draw_pitcher_side(ax, release: tuple[float, float], rubber_y: float,
     pen.limb([back_ankle, (back_ankle[0] + 0.045 * h, back_ankle[1] - 0.12)],
              [0.020 * s, 0.014 * s], _mix(dark, "white", 0.3), 2.02)
     pen.limb([shoulder, glove_elbow, glove], [0.030 * s, 0.022 * s, 0.017 * s], far, 2.04)
-    pen.mitt(glove, 0.034 * s, _LEATHER, 2.06)
+    pen.mitt(glove, 0.034 * s, dark, 2.06)
 
     # Lead leg, torso, belt, head.
     pen.limb([hip, lead_knee, ankle], [0.055 * s, 0.034 * s, 0.020 * s], color, 2.2)
@@ -219,7 +217,7 @@ def draw_batter_side(ax, color: str, stretch: float = 1.0) -> None:
     pen.limb([shoulder, head], [0.028 * s, 0.025 * s], color, 0.71)
     pen.disc(head, 0.058 * s, color, 0.72)
     pen.cap(head, 0.058 * s, facing=1, color=dark, zorder=0.73)    # looking at the pitcher
-    pen.limb([hands, (-1.05, 6.2)], [0.008 * s, 0.024 * s], _mix(_WOOD, "white", 0.35), 0.78)
+    pen.limb([hands, (-1.05, 6.2)], [0.008 * s, 0.024 * s], color, 0.78)
     pen.limb([shoulder, (0.55, 3.85), hands], [0.030 * s, 0.022 * s, 0.016 * s], dark, 0.80)
 
 
@@ -274,7 +272,7 @@ def draw_pitcher_front(ax, hand: str, arms: list[tuple[float, str]], body_color:
     glove = (-side * 0.12, 3.72)
     pen.limb([glove_shoulder, (-side * 0.98, 3.45), glove], [0.18, 0.14, 0.11],
              body_color, 1.5, halo=True)
-    pen.mitt(glove, 0.24, _LEATHER, 1.55)
+    pen.mitt(glove, 0.24, dark, 1.55)
 
     for order, (angle, color) in enumerate(arms):
         end = arm_end(hand, angle)
