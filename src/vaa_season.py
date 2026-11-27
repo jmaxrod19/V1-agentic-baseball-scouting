@@ -152,6 +152,10 @@ def comparison_from_table(
 
     pitcher_side = _row_to_side(mine, plate_height)
     league_side = _row_to_side(league, plate_height)
+    # Rank him against same-handed pitchers, from the same part of the zone.
+    same_hand = here[(here["role"] == "pitcher") & (here["hand"] == mine["hand"])]
+    pool = same_hand.set_index("pitcher_id").rename(columns={"release_z": "release_height"})
+    ranks, rank_pool = vaa_model.trait_ranks(pitcher_side, pool, pitcher_id)
     zone = (float(league["zone_bottom"]), float(league["zone_top"]))
     notes = str(mine["notes"]).split(_NOTE_SEPARATOR) if pd.notna(mine["notes"]) else []
 
@@ -173,6 +177,8 @@ def comparison_from_table(
         notes=tuple(notes),
         zone=None if np.isnan(zone).any() else zone,
         zone_part=part,
+        ranks=ranks,
+        rank_pool=rank_pool,
         ff_pct=float(mine.get("ff_pct", np.nan)),
         main_pitch=str(mine["main_pitch"]) if pd.notna(mine.get("main_pitch")) else "",
         main_pct=float(mine.get("main_pct", np.nan)),
