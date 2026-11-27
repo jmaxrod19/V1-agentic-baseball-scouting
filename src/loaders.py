@@ -395,6 +395,26 @@ def pull_player_heights(ids: list[int]) -> dict[int, int]:
     return out
 
 
+def pull_position_players(ids: list[int]) -> set[int]:
+    """Which of these players the MLB Stats API does NOT list as pitchers.
+
+    A two-way player ("TWP") counts as a pitcher. Unlike the height lookups, a
+    failed request raises: silently returning "nobody" would let position
+    players back into the pitcher tables.
+    """
+    unique = list(dict.fromkeys(int(i) for i in ids))
+    found: set[int] = set()
+    for start in range(0, len(unique), 100):
+        people = _fetch_statsapi_people(unique[start:start + 100])
+        if not people:
+            raise RuntimeError("The MLB position lookup failed. Try again.")
+        for person in people:
+            position = person.get("primaryPosition", {}).get("abbreviation")
+            if position and position not in ("P", "TWP"):
+                found.add(int(person["id"]))
+    return found
+
+
 def cached_player_heights(ids: list[int], cache_path: str | Path) -> dict[int, int]:
     """Listed heights for `ids` -> {mlbam_id: inches}, fetching only what's missing.
 

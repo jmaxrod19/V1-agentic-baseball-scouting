@@ -38,6 +38,14 @@ CLASS_THRESHOLD = 0.3            # degrees of VAA AA that counts as different fr
 SMALL_SAMPLE = 50                # fewer fastballs than this gets a warning
 MIN_LEAGUE_PITCHERS = 20         # below this the data is not a league benchmark
 _RUBBER_Y = 60.5
+
+# The parts of the strike zone a viewer can pick, with the words used for each.
+ZONE_PARTS: dict[str, str] = {
+    "all": "all heights",
+    "top": "top third of the zone",
+    "middle": "middle third of the zone",
+    "bottom": "bottom third of the zone",
+}
 _STATE_COLS = ("release_y", "release_z", "speed_y", "ay", "az")
 
 # Which parts of the release state belong to which explanation.
@@ -54,6 +62,24 @@ def _column(df: pd.DataFrame, name: str) -> pd.Series:
     if name not in df.columns:
         return pd.Series(np.nan, index=df.index, dtype=float)
     return pd.to_numeric(df[name], errors="coerce")
+
+
+def zone_part(df: pd.DataFrame) -> pd.Series:
+    """Where each pitch crossed, by height, relative to that batter's strike zone.
+
+    Returns "bottom", "middle" or "top" for the three equal thirds, "below" or
+    "above" outside the zone, and "" when the data is missing. Only height
+    counts: a pitch off the side of the plate still has a height.
+    """
+    bottom, top = _column(df, "sz_bot"), _column(df, "sz_top")
+    # 0 = bottom edge of the zone, 1 = top edge.
+    height = (_column(df, "plate_z") - bottom) / (top - bottom)
+    labels = np.select(
+        [height < 0, height < 1 / 3, height < 2 / 3, height <= 1, height > 1],
+        ["below", "bottom", "middle", "top", "above"],
+        default="",                       # NaN fails every test above
+    )
+    return pd.Series(labels, index=df.index)
 
 
 def release_states(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -224,6 +250,54 @@ class Side:
     modeled: Trajectory       # re-aimed to the comparison height
 
 
+# What a broadcaster calls each Statcast pitch code.
+PITCH_WORDS = {
+    "FF": "four-seamer", "SI": "sinker", "FC": "cutter", "SL": "slider", "ST": "sweeper",
+    "CU": "curveball", "KC": "knuckle curve", "CS": "slow curve", "SV": "slurve",
+    "CH": "changeup", "FS": "splitter", "FO": "forkball", "SC": "screwball",
+    "KN": "knuckleball", "EP": "eephus", "FA": "unclassified fastball",
+}
+
+
+def pitch_mix(data: pd.DataFrame, season: int) -> pd.DataFrame:
+    """Each pitcher's regular-season four-seam usage and most-thrown pitch.
+
+    data must hold EVERY pitch type, not just fastballs.
+    Returns one row per pitcher id: ff_pct, main_pitch (code), main_pct.
+    """
+    keep = data["pitch_type"].notna()
+    if "game_year" in data.columns:
+        keep &= data["game_year"] == season
+    if "game_type" in data.columns:
+        keep &= data["game_type"] == "R"
+    # A count table: one row per pitcher, one column per pitch type.
+    counts = pd.crosstab(data.loc[keep, "pitcher"], data.loc[keep, "pitch_type"])
+    pct = counts.div(counts.sum(axis=1), axis=0) * 100       # each row adds to 100
+    if "FF" not in pct.columns:
+        pct["FF"] = 0.0
+    main_pct = pct.max(axis=1)
+    # A tie goes to the four-seamer: nothing was thrown more often than it was.
+    main_pitch = pct.idxmax(axis=1).where(pct["FF"] < main_pct, "FF")
+    return pd.DataFrame({"ff_pct": pct["FF"], "main_pitch": main_pitch, "main_pct": main_pct})
+
+
+def not_primary_words(ff_pct: float, main_pitch: str, main_pct: float
+                      ) -> tuple[str, str, str] | None:
+    """(main pitch name, four-seam usage, main usage), or None if there is nothing to flag.
+
+    None also when the mix is unknown: say nothing rather than guess.
+    """
+    if not isinstance(main_pitch, str) or main_pitch in ("", "FF") or pd.isna(ff_pct):
+        return None
+    # Close calls (34% vs 34%) get a decimal so the difference is visible.
+    digits = 1 if round(ff_pct) == round(main_pct) else 0
+
+    def percent(value: float) -> str:
+        return "under 1%" if value < 1 else f"{value:.{digits}f}%"
+
+    return PITCH_WORDS.get(main_pitch, main_pitch), percent(ff_pct), percent(main_pct)
+
+
 @dataclass(frozen=True)
 class Comparison:
     """One pitcher's four-seamer against the league, ready to draw."""
@@ -243,6 +317,10 @@ class Comparison:
     fit_intercept: float
     notes: tuple[str, ...]             # anything estimated or worth warning about
     zone: tuple[float, float] | None   # average strike-zone bottom and top (ft)
+    zone_part: str = "all"             # which pitches are included (see ZONE_PARTS)
+    ff_pct: float = float("nan")       # season four-seam usage, all pitch types
+    main_pitch: str = ""               # most-thrown pitch code; "" when unknown
+    main_pct: float = float("nan")
 
     @property
     def modeled_gap(self) -> float:

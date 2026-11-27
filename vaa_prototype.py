@@ -13,6 +13,7 @@ The real logic lives in src/vaa_model.py (numbers) and src/vaa_charts.py (drawin
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -54,6 +55,7 @@ def main() -> None:
         c = vaa_model.compare_fastball(df, pitcher_id, args.season, args.plate_height)
     except ValueError as problem:
         raise SystemExit(str(problem))
+    c = replace(c, **vaa_model.pitch_mix(df, c.season).loc[pitcher_id].to_dict())
 
     # Listed heights from the MLB API, cached on disk so repeat runs are instant.
     heights = loaders.cached_player_heights([pitcher_id, *c.pitcher_ids], HEIGHT_CACHE)
