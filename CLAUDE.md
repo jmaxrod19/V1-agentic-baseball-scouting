@@ -38,6 +38,7 @@ baseball-scouting/
   data/
     raw/          # immutable downloads / pulls. Never edit by hand. Gitignored.
     processed/    # cleaned, analysis-ready outputs.
+  app_data/       # small committed tables the web app reads (build_vaa_table.py makes them).
   notebooks/      # exploration. Promote stable logic into src/ when it settles.
 ```
 

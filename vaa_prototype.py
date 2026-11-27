@@ -22,7 +22,7 @@ from src import loaders, vaa_charts, vaa_model
 
 ROOT = Path(__file__).resolve().parent
 HEIGHT_CACHE = ROOT / "data/processed/pitcher_heights.csv"
-DEFAULT_CSV = ROOT / "data/raw/chase_burns_2026-06-01_2026-06-28.csv"   # league-wide, June 2026
+DEFAULT_CSV = ROOT / "data/raw/statcast_2026.csv"   # league-wide, full 2026 season
 
 
 def find_pitcher(df: pd.DataFrame, query: str) -> int:

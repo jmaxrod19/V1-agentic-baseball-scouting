@@ -65,6 +65,18 @@ free tier sleeps after ~15 min idle (first request then takes ~30s to wake).
 listens on `7860`), so the app runs on any container host. For a free Space with
 more memory headroom, create a Docker Space and point it at this repo.
 
+### Fastball approach angle (VAA)
+
+The app's `/vaa` page shows, for any pitcher who threw a four-seam fastball in
+the 2026 regular season, how steeply it arrives at the plate compared with the
+league and why. It reads a small committed table (`app_data/`), rebuilt from a
+league-wide pull:
+
+```bash
+python -c "from src import loaders; loaders.pull_statcast('2026-03-01','2026-10-01', save_as='statcast_2026.csv')"
+python build_vaa_table.py
+```
+
 ## Use the pieces directly
 
 ```python
