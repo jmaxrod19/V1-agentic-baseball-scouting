@@ -228,6 +228,22 @@ _TILE_FILL = "#f3f4f6"
 _MUTED = "#6b7280"
 _DEFAULT_HEIGHT_IN = 74    # figurine size when the listed height is unknown
 _FIGURE_FILL = "#dbdee3"   # light gray for people who are only context
+# The smallest type on the chart. The page shows the chart at about half size,
+# where 12.5 pt comes out near 13 screen pixels.
+_TEXT = 12.5
+_ZONE_COLOR = "#2563eb"       # strike-zone outline and label
+_GHOST_COLOR = "#bcc1c9"      # the MLB average pitcher
+_BEND_FROM = 26.0             # flight paths are exact from here to the plate (ft)
+_BEHIND_RUBBER = 2.5          # room left of the rubber for the back foot (ft, as drawn)
+# Arm angles (degrees) below which the drawing names the slot, because a side view
+# cannot show it. These cut-offs are this page's own, not a Statcast category.
+# A few degrees under zero is still a flat, sidearm arm; submarine is clearly under.
+_SIDEARM_BELOW, _SUBMARINE_BELOW = 20, -15
+# Chart layout, in inches.
+_WIDTH_IN = 13.0
+_TOP_IN, _GAP_IN, _BOTTOM_IN = 0.10, 0.15, 0.95
+_HEADER_IN, _HEADER_WITH_VERDICT_IN = 0.80, 1.90
+_SIDE_IN, _CARDS_IN = 4.15, 2.75
 _TANGENT_RUN = 24.0        # how far back from the plate the tangent lines reach (ft)
 
 
@@ -243,20 +259,14 @@ def _fmt(value: float, decimals: int, unit: str) -> str:
     """Number with a unit, or "n/a" when missing."""
     if pd.isna(value):
         return "n/a"
-    return f"{value:.{decimals}f}{unit}"
+    # Adding 0.0 turns a "-0" (from something like -0.4) into a plain "0".
+    return f"{round(value, decimals) + 0.0:.{decimals}f}{unit}"
 
 
 # A trait that moves the angle less than this (degrees) is not worth naming.
 _BIG_EFFECT = 0.15
 _TRAIT_NAMES = {"release_height": "release height", "extension": "extension",
                 "velocity": "velocity", "ride": "ride"}
-
-
-def _effect_text(share: float) -> str:
-    """What one trait does to the angle. Words only: no degrees to decode."""
-    if abs(share) < _BIG_EFFECT:
-        return "little effect"
-    return "makes it flatter" if share > 0 else "makes it steeper"
 
 
 def _length(feet: float) -> str:
@@ -291,14 +301,9 @@ def _trait_sentence(name: str, c: Comparison) -> str | None:
 
 
 def _why(c: Comparison) -> str:
-    """The one main reason for the verdict, in baseball terms."""
+    """The one main reason for a flatter or steeper verdict; "" when about average."""
     if c.classification == "About average":
-        ranked = sorted(c.shares.items(), key=lambda item: abs(item[1]), reverse=True)
-        (first, one), (second, two) = ranked[0], ranked[1]
-        if min(abs(one), abs(two)) >= _BIG_EFFECT and one * two < 0:
-            return (f"Why: His {_TRAIT_NAMES[first]} and {_TRAIT_NAMES[second]} "
-                    "cancel each other out.")
-        return "Why: Nothing in his release or fastball changes the angle much."
+        return ""                      # nothing stands out, so offer no explanation
 
     # Only traits that push the SAME way as the verdict can explain it.
     direction = 1 if c.classification.startswith("Flatter") else -1
@@ -311,29 +316,54 @@ def _why(c: Comparison) -> str:
     return "Why: Several small differences add up, not one big one."
 
 
+def _ordinal(n: int) -> str:
+    """1 -> "1st", 22 -> "22nd", 13 -> "13th"."""
+    if 11 <= n % 100 <= 13:                      # the teens all take "th"
+        return f"{n}th"
+    suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _percentile_words(share_below: float | None) -> str:
+    """"90th percentile"; "" when there is no ranking.
+
+    Ranks the number from low to high, not good to bad.
+    """
+    if share_below is None:
+        return ""
+    # Round down and stay inside 1-99. (1e-9 absorbs 0.58*100 = 57.999...)
+    percentile = min(99, max(1, int(share_below * 100 + 1e-9)))
+    return f"{_ordinal(percentile)} percentile"
+
+
 def _cards(c: Comparison) -> list[dict]:
     """The five trait cards as plain dicts (separate from drawing, so testable)."""
     p, lg = c.pitcher, c.league
     specs = (
-        # title, attribute, decimals, unit, factor that gets its effect
-        ("RELEASE HEIGHT", "release_height", 1, " ft", "release_height"),
-        ("EXTENSION", "extension", 1, " ft", "extension"),
-        ("ARM ANGLE", "arm_angle", 0, "°", None),
-        ("VELOCITY", "velocity", 1, " mph", "velocity"),
-        ("RIDE (IVB)", "ivb", 1, " in", "ride"),
+        # title, attribute, decimals, unit
+        ("RELEASE HEIGHT", "release_height", 1, " ft"),
+        ("EXTENSION", "extension", 1, " ft"),
+        ("ARM ANGLE", "arm_angle", 0, "°"),
+        ("VELOCITY", "velocity", 1, " mph"),
+        ("RIDE (IVB)", "ivb", 1, " in"),
     )
     cards = []
-    for title, attribute, decimals, unit, factor in specs:
+    for title, attribute, decimals, unit in specs:
         mine, theirs = getattr(p, attribute), getattr(lg, attribute)
+        if attribute == "extension":             # feet and inches, as on the drawing
+            shown, average = _format_height(mine * 12), _format_height(theirs * 12)
+        else:
+            shown, average = _fmt(mine, decimals, unit), _fmt(theirs, decimals, unit)
+        rank = None if attribute == "arm_angle" else c.ranks.get(attribute)
         cards.append({
             "key": attribute,
             "title": title,
             "mine": mine,
             "theirs": theirs,
-            "value": _fmt(mine, decimals, unit),
-            "league": f"MLB avg {_fmt(theirs, decimals, unit)}",
-            # Arm angle is not one of the model's inputs, so it gets no verdict.
-            "effect": _effect_text(c.shares[factor]) if factor else "shown for context",
+            "rank": rank,
+            "percentile": _percentile_words(rank),
+            "value": shown,
+            "league": f"MLB avg {average}",
         })
     return cards
 
@@ -345,23 +375,36 @@ def fastball_vaa_chart(
 ) -> Figure:
     """Draw one pitcher's four-seamer comparison (build `c` with compare_fastball).
 
-    Top: verdict, the reason, observed VAA and MLB's VAA at the same height.
-    Middle: both modeled flight paths with tangent lines at the plate. Bottom: five trait cards and the source and method notes.
+    Top: who, and for a fastball that stands out, the verdict and reason.
+    Middle: both modeled flight paths with the two approach angles tagged in the sky.
+    Bottom: five trait cards and the source notes.
     """
-    fig = plt.figure(figsize=(13.0, 10.6))
-    grid = fig.add_gridspec(
-        3, 5, height_ratios=[2.15, 3.35, 2.5], hspace=0.10, wspace=0.07,
-        left=0.04, right=0.97, top=0.975, bottom=0.095,
-    )
+    # Heights in inches. The header is only as tall as what it has to say.
+    header = _HEADER_IN if c.classification == "About average" else _HEADER_WITH_VERDICT_IN
+    height = _TOP_IN + header + _SIDE_IN + _GAP_IN + _CARDS_IN + _BOTTOM_IN
+    fig = plt.figure(figsize=(_WIDTH_IN, height))
 
-    _draw_header(fig.add_subplot(grid[0, :]), c, pitcher_height_in, league_height_in)
+    def box(bottom_in: float, tall_in: float) -> list[float]:
+        """[left, bottom, width, height] in the figure fractions matplotlib wants."""
+        return [0.04, bottom_in / height, 0.93, tall_in / height]
 
-    side = fig.add_subplot(grid[1, :])
-    known = pitcher_height_in is not None and not pd.isna(pitcher_height_in)
-    _draw_side_view(side, c, (pitcher_height_in if known else _DEFAULT_HEIGHT_IN) / 12)
+    cards_bottom = _BOTTOM_IN
+    side_bottom = cards_bottom + _CARDS_IN + _GAP_IN
+    _draw_header(fig.add_axes(box(side_bottom + _SIDE_IN, header)), c,
+                 pitcher_height_in, league_height_in)
 
+    side = fig.add_axes(box(side_bottom, _SIDE_IN))
+    def feet(inches: float | None) -> float:
+        known = inches is not None and not pd.isna(inches)
+        return (inches if known else _DEFAULT_HEIGHT_IN) / 12
+
+    _draw_side_view(side, c, feet(pitcher_height_in), feet(league_height_in))
+
+    grid = fig.add_gridspec(1, 5, left=0.04, right=0.97, wspace=0.07,
+                            bottom=cards_bottom / height,
+                            top=(cards_bottom + _CARDS_IN) / height)
     for column, card in enumerate(_cards(c)):
-        _draw_card(fig.add_subplot(grid[2, column]), card, c.hand)
+        _draw_card(fig.add_subplot(grid[0, column]), card, c.hand)
 
     _draw_footnotes(fig, c, _vertical_stretch(side))
     return fig
@@ -381,13 +424,14 @@ def _sample_warning(c: Comparison) -> str:
 
 def _draw_header(ax, c: Comparison, height_in: float | None,
                  league_height_in: float | None) -> None:
-    """Who, the verdict, why, and the two headline numbers, all centered."""
+    """Who, the warnings, and for a fastball that stands out the verdict and why."""
+    tall = ax.get_position().height * ax.figure.get_figheight()      # inches
     ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    ax.set_ylim(tall, 0)             # y now means "inches below the top of the header"
     ax.axis("off")
 
-    ax.text(0.5, 0.95, c.name, fontsize=18, color=_INK, ha="center", va="center")
-    context = f"{c.season or ''} four-seam fastball vs. {_hand_word(c.hand)}-handed MLB".strip()
+    ax.text(0.5, 0.20, c.name, fontsize=22, color=_INK, ha="center", va="center")
+    context = f"{c.season or ''} four-seamer vs. {_hand_word(c.hand)}-handed MLB".strip()
     if c.zone_part != "all":
         context = f"{ZONE_PARTS[c.zone_part].capitalize()} only  ·  {context}"
     if c.first_date:
@@ -396,54 +440,108 @@ def _draw_header(ax, c: Comparison, height_in: float | None,
         average = ""
         if league_height_in is not None and not pd.isna(league_height_in):
             average = f" (avg {_format_height(league_height_in)})"
-        context += f"   ·   {_format_height(height_in)} tall{average}"
-    ax.text(0.5, 0.84, context, fontsize=10.5, color=_MUTED, ha="center", va="center")
+        context += f"  ·  {_format_height(height_in)}{average}"
+    ax.text(0.5, 0.60, context, fontsize=_TEXT, color=_MUTED, ha="center", va="center")
+    # The two warnings sit in opposite corners, each on two short lines.
     if c.pitcher.pitches < SMALL_SAMPLE:
-        ax.text(1.0, 0.95, _sample_warning(c), fontsize=10,
-                fontweight="bold", color=_PITCHER_COLOR, ha="right", va="center")
+        title, detail = _sample_warning(c).split(": ", 1)
+        ax.text(1.0, 0.10, title, fontsize=_TEXT, fontweight="bold", color=_PITCHER_COLOR,
+                ha="right", va="center")
+        ax.text(1.0, 0.34, detail, fontsize=_TEXT, color=_INK, ha="right", va="center")
     flag = not_primary_words(c.ff_pct, c.main_pitch, c.main_pct)
     if flag:
         main, four_seam, most = flag
-        ax.text(0.0, 0.98, "NOT HIS PRIMARY PITCH", fontsize=10, fontweight="bold",
+        ax.text(0.0, 0.10, "NOT HIS PRIMARY PITCH", fontsize=_TEXT, fontweight="bold",
                 color=_PITCHER_COLOR, va="center")
-        ax.text(0.0, 0.915, f"Four-seamer {four_seam}  ·  {main.capitalize()} {most}",
-                fontsize=9.5, color=_INK, va="center")
-    ax.text(0.5, 0.66, c.classification, fontsize=30, fontweight="bold", color=_INK,
-            ha="center", va="center")
-    ax.text(0.5, 0.50, _why(c), fontsize=12.5, color="#374151", ha="center", va="center")
+        ax.text(0.0, 0.34, f"Four-seamer {four_seam}  ·  {main.capitalize()} {most}",
+                fontsize=_TEXT, color=_INK, va="center")
+    # Only a fastball that stands out gets a heading and a reason.
+    if c.classification != "About average":
+        ax.text(0.5, 1.13, c.classification, fontsize=34, fontweight="bold", color=_INK,
+                ha="center", va="center")
+        ax.text(0.5, 1.62, _why(c), fontsize=16, color="#374151", ha="center", va="center")
 
+
+def _draw_angle_tags(ax, c: Comparison, y_top: float) -> None:
+    """The two headline numbers, as colored tags in the sky above the pitch paths."""
     # Two numbers to compare by eye: his angle, and what MLB does at that height.
     his = round(c.pitcher.observed_vaa, 1)
     # Built from the rounded gap, so what a reader subtracts matches the verdict.
     typical = his - round(c.pitcher.vaa_aa, 1)
-    blocks = (
-        (0.38, "HIS VAA", f"{his:.1f}°", _PITCHER_COLOR, "vertical approach angle"),
-        (0.62, "MLB VAA, SAME HEIGHT", f"{typical:.1f}°", _LEAGUE_COLOR,
-         "closer to zero = flatter"),
-    )
-    for x, label, value, color, note in blocks:
-        ax.text(x, 0.31, label, fontsize=9.5, fontweight="bold", color=_MUTED,
-                ha="center", va="center")
-        ax.text(x, 0.16, value, fontsize=29, fontweight="bold", color=color,
-                ha="center", va="center")
-        ax.text(x, 0.01, note, fontsize=9.5, color=_MUTED, ha="center", va="center")
+    number_z, label_z = y_top - 0.75, y_top - 1.85
+    # x is feet from the plate; his tag is on the mound side, MLB's toward the plate.
+    for x, label, value, color in ((40.0, "HIS VAA", his, _PITCHER_COLOR),
+                                   (14.0, "MLB VAA, SAME HEIGHT", typical, _LEAGUE_COLOR)):
+        ax.text(x, number_z, f"{value:.1f}°", fontsize=30, fontweight="bold", color="white",
+                ha="center", va="center", zorder=6, gid="angle-tag",
+                bbox={"boxstyle": "round,pad=0.3", "facecolor": color, "edgecolor": "none"})
+        ax.text(x, label_z, label, fontsize=_TEXT, fontweight="bold", color=color,
+                ha="center", va="center", zorder=6)
+    ax.text(27.0, number_z, "vertical approach\nangle (VAA)\ncloser to 0 = flatter",
+            fontsize=_TEXT, color=_MUTED, ha="center", va="center", zorder=6)
 
 
 def _hand_word(hand: str) -> str:
     return "right" if hand == "R" else "left"
 
 
-def _draw_side_view(ax, c: Comparison, figure_height_ft: float) -> None:
-    """Both modeled flight paths on one set of axes, with their arrival tangents."""
+def _mound_x(distance: float, anchor: float, stretch: float) -> float:
+    """Where a spot on or near the mound is drawn.
+
+    The pitchers are drawn to true proportions, so distances there are widened by the
+    same factor as height, measured from `anchor`: the MLB average release point. That
+    keeps the gray pitcher's hand exactly where his real flight path starts.
+    """
+    return anchor + (distance - anchor) * stretch
+
+
+def _bend_to_hand(y: np.ndarray, release_y: float, hand_x: float) -> np.ndarray:
+    """Slide the mound end of a flight path so it starts in the drawn pitcher's hand.
+
+    Heights are untouched, and nothing closer to the plate than _BEND_FROM moves, so
+    the arrival (the part VAA is about) is exactly as modeled. The slide is small:
+    it only covers how far his release differs from the average one.
+    """
+    t = np.clip((y - _BEND_FROM) / (release_y - _BEND_FROM), 0.0, 1.0)
+    return y + (hand_x - release_y) * t * t * (3 - 2 * t)      # 0 to 1 with no corner
+
+
+def _draw_side_view(ax, c: Comparison, figure_height_ft: float,
+                    average_height_ft: float) -> None:
+    """Both pitchers and their modeled flight paths, with the arrival tangents."""
     height = c.comparison_height
-    x_far, x_near, y_bottom, y_top = RUBBER_Y + 3.0, -2.5, -0.45, max(7.6, height + 4.0)
-    ax.set_xlim(x_far, x_near)            # reversed: mound on the left
+    # The extension measurement sits above both balls and both caps.
+    measure_z = max(c.pitcher.state["release_z"], c.league.state["release_z"],
+                    0.9 * max(figure_height_ft, average_height_ft) + 0.4) + 1.1
+    x_near, y_bottom = -2.5, -0.45
+    # Each path gets its name this far from the plate.
+    label_y = 40.0
+    at_label = {}
+    for key, s in (("p", c.pitcher), ("lg", c.league)):
+        # np.interp needs increasing x, and the path runs from far to near: reverse it.
+        at_label[key] = float(np.interp(label_y, s.modeled.y[::-1], s.modeled.z[::-1]))
+    # Leave sky above the path names for the two angle tags.
+    y_top = max(7.6, height + 4.0, measure_z + 1.1, max(at_label.values()) + 0.83 + 2.5)
     ax.set_ylim(y_bottom, y_top)
     ax.axis("off")
-
-    ground_y = np.linspace(x_near, x_far, 400)
-    ax.fill_between(ground_y, y_bottom, vaa_figures.mound_height(ground_y),
-                    color=_GROUND, linewidth=0, zorder=0.5)
+    # The left edge depends on how wide the pitchers are, which depends on the left
+    # edge. stretch = k * (far - near), so the two can be solved for directly.
+    anchor = c.league.state["release_y"]
+    ax.set_xlim(1.0, 0.0)
+    k = _vertical_stretch(ax)             # the stretch for a view exactly 1 ft wide
+    rubber_back = RUBBER_Y - anchor       # rubber behind the average release (ft)
+    x_far = ((anchor + _BEHIND_RUBBER - rubber_back * k * x_near)
+             / (1 - rubber_back * k))
+    # Seen from his throwing-arm side: a righty from the third-base side (mound on the
+    # left), a lefty from the first-base side (mound on the right). Swapping the two
+    # limits mirrors every shape and position, while the words still read normally.
+    lefty = c.hand == "L"
+    ax.set_xlim(*((x_near, x_far) if lefty else (x_far, x_near)))
+    stretch = _vertical_stretch(ax)       # limits are final now
+    # The mound is widened like the pitchers who stand on it.
+    ground_x = np.linspace(x_near, x_far, 400)
+    ground_z = vaa_figures.mound_height(anchor + (ground_x - anchor) / stretch)
+    ax.fill_between(ground_x, y_bottom, ground_z, color=_GROUND, linewidth=0, zorder=0.5)
     if c.zone is not None:
         bottom, top = c.zone
         ax.add_patch(Rectangle((0, bottom), vaa.PLATE_FRONT_Y, top - bottom,
@@ -454,52 +552,126 @@ def _draw_side_view(ax, c: Comparison, figure_height_ft: float) -> None:
             ax.add_patch(Rectangle((0, low), vaa.PLATE_FRONT_Y, third, facecolor="#3b82f6",
                                    alpha=0.55, edgecolor="none", zorder=1.1, gid="zone-third"))
 
-    release = (c.pitcher.state["release_y"], c.pitcher.state["release_z"])
-    stretch = _vertical_stretch(ax)       # limits are set above, so this is final
-    vaa_figures.draw_pitcher_side(ax, release, RUBBER_Y, figure_height_ft,
-                                  _PITCHER_COLOR, stretch)
-    vaa_figures.draw_batter_side(ax, _FIGURE_FILL, stretch)
+    # The MLB average pitcher in gray first, then him in red on top.
+    for side, height_ft, color, extra in (
+            (c.league, average_height_ft, _GHOST_COLOR, {"behind": -1.4, "ball_gid": "average-ball"}),
+            (c.pitcher, figure_height_ft, _PITCHER_COLOR, {})):
+        vaa_figures.draw_pitcher_side(
+            ax, (side.state["release_y"], side.state["release_z"]), RUBBER_Y, height_ft,
+            color, stretch, anchor=anchor, **extra)
+    _draw_plate_end(ax, c)
+    hand_x = _mound_x(c.pitcher.state["release_y"], anchor, stretch)
+    _draw_extension(ax, c, measure_z, _mound_x(RUBBER_Y, anchor, stretch), hand_x)
+    _draw_slot_tag(ax, c, hand_x)
 
     front, back = vaa.PLATE_FRONT_Y, vaa.PLATE_FRONT_Y + _TANGENT_RUN
     # A level line at the plate-crossing height, to read the tangents against.
     ax.plot([back, front], [height, height], color="#9ca3af", linewidth=1.1,
             linestyle=(0, (1, 2)), zorder=2.9, gid="level-line")
-    ax.text(back, height - 0.12, f"level, {height:g} ft", fontsize=9, color=_MUTED,
-            ha="left", va="top", zorder=5)
+    ax.text(back, height - 0.12, "level", fontsize=_TEXT, color=_MUTED,
+            ha="right" if lefty else "left", va="top", zorder=5)   # along its line
 
+    drawn = {}
     for key, s, color in (("lg", c.league, _LEAGUE_COLOR), ("p", c.pitcher, _PITCHER_COLOR)):
         path = s.modeled
-        ax.plot(path.y, path.z, color=color, linewidth=3.0, zorder=3, gid="pitch-path")
+        release_y = s.state["release_y"]
+        drawn[key] = (_bend_to_hand(path.y, release_y, _mound_x(release_y, anchor, stretch)),
+                      path.z)
+        ax.plot(*drawn[key], color=color, linewidth=3.0, zorder=3, gid="pitch-path")
         # Tangent: carry the arrival direction straight back from the plate.
         slope = path.vz_final / path.vy_final          # feet up per foot toward the mound
         ax.plot([front, back], [height, height + slope * _TANGENT_RUN], color=color,
                 linewidth=1.5, linestyle=(0, (5, 3)), zorder=3.1, gid="tangent-line")
-        if key == "lg":                                # his ball is drawn by the figure
-            ax.scatter([path.y[0]], [path.z[0]], color=color, s=40, zorder=4,
-                       edgecolors="white", linewidths=1.2)
     ax.scatter([front], [height], color=_INK, s=34, zorder=4.2,
                edgecolors="white", linewidths=1.0)
-    ax.text(back, height + 0.95 + max(0.0, c.pitcher.modeled.vz_final / c.pitcher.modeled.vy_final,
-                                      c.league.modeled.vz_final / c.league.modeled.vy_final)
-            * _TANGENT_RUN, "dashed = arrival angle at the plate", fontsize=9,
-            color=_MUTED, ha="center", va="center", zorder=5)
+    # Under the paths, a little below the level line.
+    ax.text(22.0, height - 1.45, "dashed line = the ball's direction\nas it reaches the plate",
+            fontsize=_TEXT, color=_MUTED, ha="center", va="center", zorder=5)
 
     # Name each path right on it; the higher one gets its name above.
-    label_y = 40.0
-    at_label = {}
-    for key, s in (("p", c.pitcher), ("lg", c.league)):
-        # np.interp needs increasing x, and the path runs from far to near: reverse it.
-        at_label[key] = float(np.interp(label_y, s.modeled.y[::-1], s.modeled.z[::-1]))
+    for key, (x, z) in drawn.items():                     # where the line really is now
+        at_label[key] = float(np.interp(label_y, x[::-1], z[::-1]))
     higher = "p" if at_label["p"] >= at_label["lg"] else "lg"
     for key, text, color in (("p", c.name, _PITCHER_COLOR), ("lg", "MLB average", _LEAGUE_COLOR)):
         above = key == higher
-        ax.text(label_y, at_label[key] + (0.28 if above else -0.28), text, fontsize=12,
+        ax.text(label_y, at_label[key] + (0.28 if above else -0.28), text, fontsize=15,
                 fontweight="bold", color=color, ha="center",
                 va="bottom" if above else "top", zorder=5)
 
-    ax.text(0.5, 0.995,
-            f"Modeled average pitches, both aimed to cross the front of the plate at {height:g} ft",
-            transform=ax.transAxes, fontsize=9.5, color=_MUTED, ha="center", va="top")
+    # Written on the ground itself.
+    ax.text(30.0, y_bottom / 2,
+            f"His typical fastball and MLB's, both crossing the plate {height:g} ft high",
+            fontsize=_TEXT, color=_MUTED, ha="center", va="center", zorder=5)
+    _draw_angle_tags(ax, c, y_top)
+
+
+def _draw_extension(ax, c: Comparison, level: float, rubber_x: float,
+                    hand_x: float) -> None:
+    """Measure how far in front of the rubber he lets go, the way a pitching lab does:
+
+    one upright line from the rubber, one from the ball, joined above his head with
+    the length written in the middle. `rubber_x` and `hand_x` are where the widened
+    mound drawing puts the rubber and the hand.
+    """
+    if pd.isna(c.pitcher.extension):
+        return                                    # nothing measured: draw nothing
+    release_z = c.pitcher.state["release_z"]
+    rubber_top = float(vaa_figures.mound_height(RUBBER_Y))
+    # The pitching rubber, where every extension is measured from.
+    ax.add_patch(Rectangle((rubber_x - 0.7, rubber_top), 1.4, 0.12,
+                           facecolor="white", edgecolor=_INK, linewidth=1.0, zorder=2.9))
+    # The two uprights, each running a little past the measuring line. They sit
+    # behind the figure (low zorder), so a low release does not cross out his face.
+    for y, bottom in ((rubber_x, rubber_top), (hand_x, release_z)):
+        ax.plot([y, y], [bottom, level + 0.22], color=_PITCHER_COLOR, linewidth=1.5,
+                zorder=1.9, gid="extension-upright")
+    ax.plot([rubber_x, hand_x], [level, level], color=_PITCHER_COLOR, linewidth=1.5,
+            zorder=3.2, gid="extension-line")
+    middle = (rubber_x + hand_x) / 2
+    # A white box behind the number breaks the line, as in the reference drawing.
+    ax.text(middle, level, _format_height(c.pitcher.extension * 12), fontsize=14,
+            fontweight="bold", color=_PITCHER_COLOR, ha="center", va="center", zorder=5,
+            bbox={"facecolor": "white", "edgecolor": "none", "pad": 2.0})
+    # Above the tops of the uprights: a short extension is narrower than the word.
+    ax.text(middle, level + 0.34, "extension", fontsize=_TEXT, color=_PITCHER_COLOR,
+            ha="center", va="bottom", zorder=5)
+
+
+def _slot_name(arm_angle: float) -> str | None:
+    """"SIDEARM" or "SUBMARINE" for a low slot; None for everyone else or no data."""
+    if pd.isna(arm_angle):
+        return None
+    angle = round(arm_angle)              # judge the number the card shows
+    if angle < _SUBMARINE_BELOW:
+        return "SUBMARINE"
+    return "SIDEARM" if angle < _SIDEARM_BELOW else None
+
+
+def _draw_slot_tag(ax, c: Comparison, hand_x: float) -> None:
+    """Say it under his hand: from the side, a low arm slot just looks like a short arm."""
+    name = _slot_name(c.pitcher.arm_angle)
+    if name is None:
+        return
+    # A little toward the plate and below the hand; never down on the ground.
+    height = max(1.2, c.pitcher.state["release_z"] - 2.25)
+    ax.text(hand_x - 7.0, height, f"{name}\n{_fmt(c.pitcher.arm_angle, 0, '°')} arm angle",
+            fontsize=15, fontweight="bold", color="white", ha="center", va="center",
+            zorder=7, gid="slot-tag",
+            bbox={"boxstyle": "round,pad=0.45", "facecolor": _PITCHER_COLOR, "edgecolor": "none"})
+
+
+def _draw_plate_end(ax, c: Comparison) -> None:
+    """What the pitch is thrown to: home plate, and the strike zone with its name."""
+    front = vaa.PLATE_FRONT_Y                 # the plate runs from 0 (back tip) to here
+    ax.add_patch(Rectangle((0, 0), front, 0.14, facecolor="white", edgecolor=_INK,
+                           linewidth=1.2, zorder=1.5, gid="home-plate"))
+    if c.zone is None:                        # no strike-zone data: just the plate
+        return
+    bottom, top = c.zone
+    ax.add_patch(Rectangle((0, bottom), front, top - bottom, facecolor="none",
+                           edgecolor=_ZONE_COLOR, linewidth=2.0, zorder=2.0, gid="zone-outline"))
+    ax.text(front / 2, bottom - 0.25, "strike zone", fontsize=_TEXT, color=_ZONE_COLOR,
+            ha="center", va="top", zorder=5)
 
 
 def _vertical_stretch(ax) -> float:
@@ -514,7 +686,7 @@ def _vertical_stretch(ax) -> float:
 
 
 def _draw_card(ax, card: dict, hand: str) -> None:
-    """One trait: value, league value, small picture, and its effect on the angle."""
+    """One trait: value, league value, and a ranking line (or the arm drawing)."""
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -522,68 +694,96 @@ def _draw_card(ax, card: dict, hand: str) -> None:
         (0.01, 0.01), 0.98, 0.98, boxstyle="round,pad=0,rounding_size=0.06",
         facecolor=_TILE_FILL, edgecolor="none",
     ))
-    ax.text(0.5, 0.91, card["title"], fontsize=9.5, fontweight="bold", color=_MUTED,
+    ax.text(0.5, 0.88, card["title"], fontsize=_TEXT, fontweight="bold", color=_MUTED,
             ha="center", va="center")
-    ax.text(0.5, 0.77, card["value"], fontsize=22, fontweight="bold", color=_INK,
+    ax.text(0.5, 0.70, card["value"], fontsize=25, fontweight="bold", color=_INK,
             ha="center", va="center")
-    ax.text(0.5, 0.645, card["league"], fontsize=9.5, color=_MUTED, ha="center", va="center")
-    ax.plot([0.12, 0.88], [0.235, 0.235], color="#d1d5db", linewidth=1.0)
-    ax.text(0.5, 0.165, "EFFECT ON ANGLE", fontsize=7.5, color=_MUTED, ha="center", va="center")
-    ax.text(0.5, 0.075, card["effect"], fontsize=11, fontweight="bold", color=_INK,
-            ha="center", va="center")
+    ax.text(0.5, 0.545, card["league"], fontsize=_TEXT, color=_MUTED, ha="center", va="center")
+    ax.text(0.5, 0.14, card["percentile"], fontsize=14, color=_INK, ha="center", va="center")
+    if card["key"] == "arm_angle":
+        _draw_arm_picture(ax, card, hand)
+    elif card["rank"] is not None:
+        _draw_rank_line(ax, card["rank"])
 
+
+def _draw_rank_line(ax, share_below: float) -> None:
+    """A low-to-high line: the middle pitcher marked, and a dot where this one sits."""
+    left, right, y = 0.12, 0.88, 0.33
+    ax.plot([left, right], [y, y], color="#d1d5db", linewidth=7, solid_capstyle="round")
+    ax.plot([0.5, 0.5], [y - 0.06, y + 0.06], color=_LEAGUE_COLOR, linewidth=2)
+    # share_below runs from 0 (lowest) to 1 (highest), so it places the dot directly.
+    ax.scatter([left + (right - left) * share_below], [y], s=190, color=_PITCHER_COLOR,
+               edgecolors="white", linewidths=2, zorder=3, gid="rank-dot")
+
+
+def _draw_arm_picture(ax, card: dict, hand: str) -> None:
+    """A small front view with both arm angles, drawn true to scale."""
     mine, theirs = card["mine"], card["theirs"]
     if pd.isna(mine) or pd.isna(theirs):
         return                                   # missing data: show "n/a", draw nothing
-    picture = ax.inset_axes([0.14, 0.27, 0.72, 0.33])
+    picture = ax.inset_axes([0.06, 0.05, 0.88, 0.43])     # the whole lower half
     picture.axis("off")
+    picture.set_aspect("equal")                  # equal scales: the arm angle is TRUE
+    direction = -1 if hand == "R" else 1         # which side the throwing arm is on
+    picture.set_xlim(*sorted((direction * 3.2, -direction * 1.4)))
+    picture.set_ylim(2.72, 6.9)
+    start = direction * vaa_figures.FRONT_SHOULDER_HALF
+    level = vaa_figures.FRONT_SHOULDER_Z
+    picture.plot([start, start + direction * 2.5], [level, level], color="#9ca3af",
+                 linewidth=1.0, linestyle=(0, (3, 3)), zorder=0.5)
+    vaa_figures.draw_pitcher_front(picture, hand,
+                                   [(theirs, _LEAGUE_COLOR), (mine, _PITCHER_COLOR)],
+                                   _FIGURE_FILL)
 
-    if card["key"] == "arm_angle":
-        picture.set_aspect("equal")              # equal scales: the arm angle is TRUE
-        direction = -1 if hand == "R" else 1     # which side the throwing arm is on
-        picture.set_xlim(*sorted((direction * 3.2, -direction * 1.4)))
-        picture.set_ylim(2.72, 6.9)
-        start = direction * vaa_figures.FRONT_SHOULDER_HALF
-        level = vaa_figures.FRONT_SHOULDER_Z
-        picture.plot([start, start + direction * 2.5], [level, level], color="#9ca3af",
-                     linewidth=1.0, linestyle=(0, (3, 3)), zorder=0.5)
-        vaa_figures.draw_pitcher_front(picture, hand,
-                                       [(theirs, _LEAGUE_COLOR), (mine, _PITCHER_COLOR)],
-                                       _FIGURE_FILL)
-    else:
-        # Two bars from a shared zero: pitcher on top, league below.
-        picture.barh([1, 0], [mine, theirs], height=0.55, color=[_PITCHER_COLOR, _LEAGUE_COLOR])
-        picture.axvline(0, color=_INK, linewidth=1.2)
-        picture.set_xlim(min(0.0, mine, theirs), max(mine, theirs, 0.0) * 1.04)
-        picture.set_ylim(-0.7, 1.7)
+
+def _season_words(c: Comparison) -> str:
+    if _full_season(c):
+        return f"full {c.season} regular season"
+    dates = f", {c.first_date} to {c.last_date}" if c.first_date else ""
+    return f"{c.season} regular season{dates}"
+
+
+def method_notes(c: Comparison) -> list[str]:
+    """How the chart's numbers are made, for the page to show on request."""
+    lg = c.league
+    return [
+        f"Source: Baseball Savant Statcast via pybaseball, {_season_words(c)}. League: "
+        f"{lg.pitches:,} {_hand_word(c.hand)}-handed four-seamers from {c.league_pitchers} pitchers.",
+        "VAA is the downward angle of the ball at the front of the plate: atan2(vz, |vy|).",
+        "MLB VAA, same height: the league average for fastballs crossing the plate where his did.",
+        "Pitch paths are modeled from average measured release point, speed and acceleration "
+        "(gravity, drag, spin).",
+        "Red is him; gray is an MLB average pitcher with the average height and release. "
+        "The pitchers are drawn to true proportions, much larger than the distance to the "
+        "plate. Release height and extension are measured; the stride and lean are drawn "
+        "from extension, not tracked.",
+        "The reason given for a flatter or steeper fastball comes from a model of four inputs. "
+        "Extension is judged with release height and speed held equal.",
+        "Percentiles run from lowest to highest number, not worst to best. The 50th is the "
+        "middle pitcher, which can differ a little from the MLB average of all pitches.",
+        "Arm angle is Statcast's line from the throwing shoulder to the ball at release, "
+        "against flat ground: 0° is sidearm, 90° is over the top.",
+        f"The drawing tags a slot below {_SIDEARM_BELOW}° as sidearm and below "
+        f"{_SUBMARINE_BELOW}° as submarine. Those cut-offs are this page's own, not "
+        "Statcast categories.",
+    ]
 
 
 def _draw_footnotes(fig, c: Comparison, stretch: float) -> None:
-    """Source, sample, method and any warnings, in one quiet block."""
-    p, lg = c.pitcher, c.league
-    if _full_season(c):
-        season = f"full {c.season} regular season"
-    else:
-        dates = f", {c.first_date} to {c.last_date}" if c.first_date else ""
-        season = f"{c.season} regular season{dates}"
-    third = "" if c.zone_part == "all" else f" ({c.zone_part} third)"
-    lines = [
-        f"Source: Baseball Savant Statcast via pybaseball  ·  {season}  ·  "
-        f"{c.name}: {p.pitches:,} four-seamers{third}  ·  {_hand_word(c.hand)}-handed MLB: "
-        f"{lg.pitches:,} from {c.league_pitchers} pitchers",
-        f"Paths are modeled from average measured release point, speed and acceleration "
-        f"(gravity, drag, spin).  Side view height stretched {stretch:.1f}×.  Figures illustrative.",
-        f"VAA = atan2(vz, |vy|) at the front of the plate.  MLB VAA, same height = league "
-        f"average for fastballs crossing the plate where his did.",
-        "Why and card effects come from a model of four inputs (extension holds release height "
-        "and speed equal).  Arm angle: 0° sidearm, 90° over the top.",
-    ]
+    """Source and sample in two lines, plus any warning about the data."""
+    third = "" if c.zone_part == "all" else f" in the {c.zone_part} third"
+    lines = [f"Statcast, {_season_words(c)}  ·  {c.pitcher.pitches:,} four-seamers{third}  ·  "
+             f"ball flight drawn {stretch:.1f}× taller than true"]
+    if c.ranks:
+        lines.append(f"Percentiles: low to high, vs. {c.rank_pool} {_hand_word(c.hand)}-handers "
+                     f"with {SMALL_SAMPLE}+ four-seamers{third}")
+    tall = fig.get_figheight()
     for row, line in enumerate(lines):
-        fig.text(0.5, 0.070 - row * 0.017, line, fontsize=8.5, color=_MUTED, ha="center")
+        fig.text(0.5, (0.62 - row * 0.27) / tall, line, fontsize=_TEXT, color=_MUTED, ha="center")
     # The small-sample warning is already at the top of the chart; do not repeat it.
     notes = [n for n in c.notes if not n.startswith("small sample")]
     if notes:
         estimated = any("estimated" in n or "derived" in n for n in notes)
         lead = "APPROXIMATION" if estimated else "Note"
-        fig.text(0.5, 0.070 - len(lines) * 0.017, f"{lead}: {'; '.join(notes)}.",
-                 fontsize=8.5, fontweight="bold", color=_PITCHER_COLOR, ha="center")
+        fig.text(0.5, (0.62 - len(lines) * 0.27) / tall, f"{lead}: {'; '.join(notes)}.",
+                 fontsize=11, fontweight="bold", color=_PITCHER_COLOR, ha="center")

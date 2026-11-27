@@ -133,6 +133,11 @@ _PAGE_CSS = """
   .notprimary { background:var(--panel); border:1px solid var(--line);
                 border-left:6px solid var(--accent); border-radius:8px;
                 padding:12px 18px; margin:0 0 18px; }
+  .wide .note { font-size:15px; }
+  .method { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:12px 18px; margin:12px 0 0; }
+  .method summary { cursor:pointer; font-weight:700; }
+  .method li { margin:0 0 6px; }
   .picks li { margin:0 0 8px; }
   .error { background:var(--panel); border:1px solid var(--accent);
            border-radius:10px; padding:22px; }
@@ -433,12 +438,18 @@ def _zone_panel(pitcher_id: int, part: str) -> str:
         <div class=why>
           {_takeaway(part)}
           <p><a href=#story>Read more ↓</a></p>
-          <p class=note>Thirds are of each batter’s strike zone, by height only.
-             Pitches above or below the zone are counted in “All heights”. The chart
-             compares this pitcher only with fastballs from the same part.</p>
+          <p class=note>Thirds are of each batter’s strike zone. The chart compares him
+             only with fastballs from the same part.</p>
         </div>
       </div>
     """
+
+
+def _method_panel(pitcher_id: int, part: str) -> str:
+    """The chart's method notes, folded away until a reader asks for them."""
+    c = vaa_season.comparison_from_table(_vaa_table(), pitcher_id, part)[0]
+    items = "".join(f"<li>{html.escape(note)}</li>" for note in vaa_charts.method_notes(c))
+    return f"<details class=method><summary>How this is calculated</summary><ul>{items}</ul></details>"
 
 
 def _primary_note(pitcher: pd.Series) -> str:
@@ -504,7 +515,7 @@ def vaa_page(name: str = "", pitcher: str = "", zone: str = "all") -> HTMLRespon
         png = _vaa_png(pitcher_id, zone)
         chart = (f'<img class=chart alt="{safe_name}: {_VAA_SEASON} four-seam fastball approach '
                  f'angle, {ZONE_PARTS[zone]}, compared with the MLB average" '
-                 f'src="data:image/png;base64,{png}">')
+                 f'src="data:image/png;base64,{png}">') + _method_panel(pitcher_id, zone)
     except ValueError as problem:
         # e.g. never threw one in this third: keep the picker so another can be chosen.
         chart = f"<div class=error><p>{html.escape(str(problem))}</p></div>"

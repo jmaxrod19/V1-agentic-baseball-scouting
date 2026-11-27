@@ -115,6 +115,11 @@ def test_table_gives_the_same_answer_as_the_pitches(data, table, height):
     assert stored.pitcher.modeled.vaa == pytest.approx(direct.pitcher.modeled.vaa, abs=1e-5)
     assert stored.league.modeled.vaa == pytest.approx(direct.league.modeled.vaa, abs=1e-5)
     assert stored.shares == pytest.approx(direct.shares, abs=1e-5)
+    # The card rankings: same other pitchers, same answer from either route.
+    assert stored.rank_pool == direct.rank_pool == 29
+    assert set(stored.ranks) == set(direct.ranks) == set(vaa_model.RANKED_TRAITS)
+    for trait in ("release_height", "extension"):        # others are identical for all
+        assert stored.ranks[trait] == pytest.approx(direct.ranks[trait])
     assert stored.zone == pytest.approx(direct.zone)
 
 
@@ -299,3 +304,9 @@ def test_the_shipped_table_has_no_position_players():
     """Victor Robles (645302) and Jhonny Pereda (640902) pitched in 2026."""
     table = pd.read_csv(webapp._VAA_TABLE)
     assert not table["pitcher_id"].isin([645302, 640902]).any()
+
+
+def test_method_notes_are_on_the_page_but_folded_away(page):
+    text = page(name="Test Arm1")
+    assert "<details class=method><summary>How this is calculated</summary>" in text
+    assert text.index("data:image/png") < text.index("class=method")

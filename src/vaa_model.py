@@ -24,7 +24,7 @@ z = height. A pitch heading home has negative vy, and a falling one negative vz.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import combinations
 from math import factorial
 
@@ -321,6 +321,9 @@ class Comparison:
     ff_pct: float = float("nan")       # season four-seam usage, all pitch types
     main_pitch: str = ""               # most-thrown pitch code; "" when unknown
     main_pct: float = float("nan")
+    # {card trait: share of other pitchers below him, 0 to 1}; see trait_ranks.
+    ranks: dict = field(default_factory=dict)
+    rank_pool: int = 0                 # how many pitchers he was ranked against
 
     @property
     def modeled_gap(self) -> float:
@@ -348,6 +351,40 @@ def _side(rows: pd.DataFrame, states: pd.DataFrame, expected: np.ndarray,
         state=state,
         modeled=model_trajectory(state, plate_height),
     )
+
+
+# The Side attributes that get a league ranking on the cards.
+RANKED_TRAITS = ("release_height", "extension", "arm_angle", "velocity", "ivb")
+
+
+def trait_ranks(side: Side, pool: pd.DataFrame, pitcher_id: int) -> tuple[dict, int]:
+    """Where one pitcher sits among the other pitchers with enough fastballs.
+
+    pool is indexed by pitcher id, with `pitches` and one column per RANKED_TRAITS.
+    Returns ({trait: share of them below him}, pitchers compared with).
+    """
+    others = pool[(pool["pitches"] >= SMALL_SAMPLE) & (pool.index != pitcher_id)]
+    ranks = {}
+    for trait in RANKED_TRAITS:
+        mine, theirs = getattr(side, trait), others[trait].dropna()
+        if pd.notna(mine) and not theirs.empty:
+            # The mean of a True/False column is the share that is True.
+            ranks[trait] = float((theirs < mine).mean())
+    return ranks, len(others)
+
+
+def _pitcher_averages(rows: pd.DataFrame, states: pd.DataFrame) -> pd.DataFrame:
+    """One row per pitcher: pitch count and the card traits, like _side but for all."""
+    per_pitch = pd.DataFrame({
+        "pitcher": rows["pitcher"],
+        "release_height": states["release_z"],
+        "extension": _column(rows, "release_extension"),
+        "arm_angle": _column(rows, "arm_angle"),
+        "velocity": _column(rows, "release_speed"),
+        "ivb": _column(rows, "pfx_z") * 12,                    # pfx_z is in feet
+    })
+    groups = per_pitch.groupby("pitcher")
+    return groups.mean().assign(pitches=groups.size())
 
 
 def compare_fastball(data: pd.DataFrame, pitcher_id: int, season: int | None = None,
@@ -416,6 +453,9 @@ def compare_fastball(data: pd.DataFrame, pitcher_id: int, season: int | None = N
     last, _, first = name.partition(", ")                # Statcast gives "Last, First"
 
     zone = (float(_column(league, "sz_bot").mean()), float(_column(league, "sz_top").mean()))
+    ranks, rank_pool = trait_ranks(
+        pitcher_side, _pitcher_averages(league.loc[league_states.index], league_states),
+        pitcher_id)
 
     return Comparison(
         zone=None if np.isnan(zone).any() else zone,
@@ -434,4 +474,6 @@ def compare_fastball(data: pd.DataFrame, pitcher_id: int, season: int | None = N
         fit_slope=float(slope),
         fit_intercept=float(intercept),
         notes=tuple(notes),
+        ranks=ranks,
+        rank_pool=rank_pool,
     )

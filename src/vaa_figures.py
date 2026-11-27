@@ -3,13 +3,16 @@ Figurines for the VAA chart prototypes: shaped baseball-player silhouettes.
 
 Each body part is a filled "capsule": two circles (one per joint) with straight
 sides between them, so a thigh can be thick at the hip and thin at the knee.
-Stacking capsules gives a smooth silhouette with a cap, glove, shoes and ball.
+Stacking capsules gives a smooth silhouette with a cap, shoes and ball.
 
 The figures are SCHEMATIC. Only a few things come from real data:
     - the pitcher's ball sits at the measured average release point,
     - the body is sized from his listed height,
     - the arm in the front view is drawn at the measured Savant arm angle.
-The rest of the pose (knees, hips, lead foot) is a believable guess.
+The rest of the pose (stride, hips, lean, knees) is an illustration sized to his
+height. In the side view it follows his extension: a longer one means a longer
+stride, lower hips and more forward lean. That is not measured body tracking.
+The side view leaves out the glove arm to keep the throwing arm clear.
 """
 
 from __future__ import annotations
@@ -17,6 +20,9 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Polygon
+
+# The side view's pose is judged against this typical extension (ft).
+_TYPICAL_EXTENSION = 6.5
 
 # Official mound, simplified to straight segments: 10 inches high at the rubber,
 # falling 1 inch per foot toward the plate, then down to field level.
@@ -79,13 +85,19 @@ class _Pen:
     positions in feet.
     """
 
-    def __init__(self, ax, stretch: float = 1.0):
+    def __init__(self, ax, stretch: float = 1.0, anchor: float | None = None,
+                 lift: float = 0.0):
         self.ax = ax
         self.stretch = stretch
+        self.anchor = anchor      # if set, widen distances around here by `stretch` too
+        self.lift = lift          # added to every zorder: negative puts a figure behind
 
     def screen(self, point) -> np.ndarray:
         """(distance, height) in feet -> screen-proportional coordinates."""
-        return np.array([point[0], point[1] * self.stretch], dtype=float)
+        x = point[0]
+        if self.anchor is not None:
+            x = self.anchor + (x - self.anchor) * self.stretch
+        return np.array([x, point[1] * self.stretch], dtype=float)
 
     def fill(self, outline: np.ndarray, color, zorder: float, edge="none",
              edge_width: float = 0.0, gid: str | None = None) -> None:
@@ -93,7 +105,7 @@ class _Pen:
         points = np.array(outline, dtype=float)
         points[:, 1] /= self.stretch                      # back to feet
         self.ax.add_patch(Polygon(points, closed=True, facecolor=color, edgecolor=edge,
-                                  linewidth=edge_width, zorder=zorder, gid=gid,
+                                  linewidth=edge_width, zorder=zorder + self.lift, gid=gid,
                                   joinstyle="round"))
 
     def limb(self, joints: list, radii: list[float], color, zorder: float,
@@ -143,44 +155,61 @@ class _Pen:
 # ---------------------------------------------------------------------------
 
 def draw_pitcher_side(ax, release: tuple[float, float], rubber_y: float,
-                      height_ft: float, color: str, stretch: float = 1.0) -> None:
+                      height_ft: float, color: str, stretch: float = 1.0,
+                      anchor: float | None = None, behind: float = 0.0,
+                      ball_gid: str = "ball") -> None:
     """A pitcher at the moment of release, seen from the side.
 
     release    (distance from plate, height) of the ball: the hand goes here.
     rubber_y   distance of the pitching rubber from the plate.
     height_ft  listed height; body segments are fractions of it.
     stretch    how much taller than true scale the chart draws things.
+    anchor     if given, draw him to true proportions: distances from this point are
+               widened by `stretch` too, so he looks like a person and differences show.
+               Everything drawn with the same anchor shares one scale.
+    behind     lower every zorder by this much (negative), to put him behind another.
+    ball_gid   tag for the ball, so the two pitchers' balls can be told apart.
     The plate is at SMALLER y, so "forward" means subtracting from y.
     """
     rel_y, rel_z = release
     h = height_ft
-    pen = _Pen(ax, stretch)
+    pen = _Pen(ax, stretch, anchor=anchor, lift=behind)
     s = h * stretch                       # body height as it appears on screen
 
     far = _mix(color, "white", 0.38)      # limbs on the far side are lighter
     dark = _mix(color, "black", 0.32)     # cap and shoes
 
-    # Joints. The lead foot lands about 85% of body height in front of the rubber.
-    lead_y = rubber_y - 0.85 * h
+    # Joints. `reach` is how much farther (+) or shorter (-) than typical he gets
+    # down the mound, in feet. It drives the whole pose, not only the hand.
+    reach = float(np.clip((rubber_y - rel_y) - _TYPICAL_EXTENSION, -2.0, 1.5))
+
+    # Stride: about 85% of body height, plus more for a longer extension.
+    stride = float(np.clip(0.85 * h + 1.2 * reach, 0.55 * h, 1.10 * h))
+    lead_y = rubber_y - stride
     ankle = (lead_y, float(mound_height(lead_y)) + 0.14)
     back_y = rubber_y - 0.7
     back_ankle = (back_y, float(mound_height(back_y)) + 0.22)   # dragging off the rubber
 
-    hip = (lead_y + 0.15 * h, ankle[1] + 0.39 * h)
-    shoulder = (hip[0] - 0.12 * h, hip[1] + 0.28 * h)           # torso tilted forward
-    lead_knee = (lead_y - 0.03 * h, ankle[1] + 0.22 * h)
-    back_knee = (hip[0] + 0.22 * h, hip[1] - 0.20 * h)
-    head = (shoulder[0] - 0.05 * h, shoulder[1] + 0.135 * h)
-    elbow = ((shoulder[0] + rel_y) / 2 + 0.25, (shoulder[1] + rel_z) / 2 - 0.15)
-    glove_elbow = (shoulder[0] - 0.09 * h, shoulder[1] - 0.17 * h)
-    glove = (shoulder[0] - 0.23 * h, shoulder[1] - 0.13 * h)
+    # Hips sink and the chest comes farther forward as the extension grows.
+    hip = (lead_y + h * (0.15 + 0.02 * reach), ankle[1] + h * (0.39 - 0.045 * reach))
+    lean = np.radians(np.clip(23 + 14 * reach, 3, 45))          # torso tilt from upright
+    torso = 0.305 * h
+    shoulder = (hip[0] - torso * np.sin(lean), hip[1] + torso * np.cos(lean))
+    head = (shoulder[0] - 0.144 * h * np.sin(0.55 * lean),
+            shoulder[1] + 0.144 * h * np.cos(0.55 * lean))
+    lead_knee = (lead_y - 0.03 * h, ankle[1] + h * (0.22 - 0.02 * reach))
+    # The back knee sits part of the way to the trailing foot, never under the mound.
+    knee_y = hip[0] + 0.45 * (back_ankle[0] - hip[0])
+    back_knee = (knee_y, max(hip[1] - 0.20 * h, float(mound_height(knee_y)) + 0.35))
 
-    # Far side first, so everything nearer is painted over it.
+    def elbow_toward(hand: tuple[float, float]) -> tuple[float, float]:
+        """Halfway from shoulder to hand, dropped a little so the arm bends."""
+        return ((shoulder[0] + hand[0]) / 2 + 0.25, (shoulder[1] + hand[1]) / 2 - 0.15)
+
+    # Far leg first, so everything nearer is painted over it.
     pen.limb([hip, back_knee, back_ankle], [0.050 * s, 0.031 * s, 0.018 * s], far, 2.0)
     pen.limb([back_ankle, (back_ankle[0] + 0.045 * h, back_ankle[1] - 0.12)],
              [0.020 * s, 0.014 * s], _mix(dark, "white", 0.3), 2.02)
-    pen.limb([shoulder, glove_elbow, glove], [0.030 * s, 0.022 * s, 0.017 * s], far, 2.04)
-    pen.mitt(glove, 0.034 * s, dark, 2.06)
 
     # Lead leg, torso, belt, head.
     pen.limb([hip, lead_knee, ankle], [0.055 * s, 0.034 * s, 0.020 * s], color, 2.2)
@@ -191,34 +220,15 @@ def draw_pitcher_side(ax, release: tuple[float, float], rubber_y: float,
     pen.limb([(waist[0] - 0.088 * h, waist[1] + 0.007 * h), (waist[0] + 0.088 * h, waist[1] - 0.007 * h)],
              [0.008 * s, 0.008 * s], dark, 2.33)
     pen.limb([shoulder, head], [0.030 * s, 0.025 * s], color, 2.35)            # neck
-    pen.disc(head, 0.058 * s, color, 2.7, edge="white", edge_width=1.0)
+    pen.disc(head, 0.058 * s, color, 2.7, edge="white", edge_width=1.0, gid="head")
     pen.cap(head, 0.058 * s, facing=-1, color=dark, zorder=2.72)               # looking at the plate
 
-    # Throwing arm on top, ending in the ball exactly at the release point.
-    pen.limb([shoulder, elbow, release], [0.034 * s, 0.022 * s, 0.014 * s], color, 2.6, halo=True)
-    pen.disc(release, 0.024 * s, "white", 3.5, edge=dark, edge_width=1.3, gid="ball")
-
-
-def draw_batter_side(ax, color: str, stretch: float = 1.0) -> None:
-    """A generic right-sized batter at the plate, faint, for context only."""
-    pen = _Pen(ax, stretch)
-    s = 6.1 * stretch
-    far = _mix(color, "white", 0.45)
-    dark = _mix(color, "black", 0.12)
-
-    hip, shoulder = (0.9, 3.0), (0.8, 4.55)
-    head, hands = (0.95, 5.35), (-0.15, 4.55)
-
-    pen.limb([hip, (-0.35, 1.6), (-0.6, 0.18)], [0.050 * s, 0.032 * s, 0.019 * s], far, 0.60)
-    pen.limb([(-0.6, 0.16), (-0.05, 0.1)], [0.020 * s, 0.013 * s], far, 0.61)
-    pen.limb([hip, (2.2, 1.6), (2.8, 0.18)], [0.055 * s, 0.034 * s, 0.020 * s], color, 0.65)
-    pen.limb([(2.8, 0.16), (3.35, 0.1)], [0.022 * s, 0.014 * s], dark, 0.66)
-    pen.limb([hip, shoulder], [0.060 * s, 0.075 * s], color, 0.70)
-    pen.limb([shoulder, head], [0.028 * s, 0.025 * s], color, 0.71)
-    pen.disc(head, 0.058 * s, color, 0.72)
-    pen.cap(head, 0.058 * s, facing=1, color=dark, zorder=0.73)    # looking at the pitcher
-    pen.limb([hands, (-1.05, 6.2)], [0.008 * s, 0.024 * s], color, 0.78)
-    pen.limb([shoulder, (0.55, 3.85), hands], [0.030 * s, 0.022 * s, 0.016 * s], dark, 0.80)
+    # Throwing arm on top, ending in the ball exactly at the release point. It is drawn
+    # over the head (2.7): from this side the throwing arm is the nearer thing, and a
+    # low release would otherwise leave the ball floating on his cap.
+    pen.limb([shoulder, elbow_toward(release), release],
+             [0.034 * s, 0.022 * s, 0.014 * s], color, 2.8, halo=True)
+    pen.disc(release, 0.024 * s, "white", 3.5, edge=dark, edge_width=1.3, gid=ball_gid)
 
 
 # Front view geometry, in arbitrary body units (the axes use equal scales).
