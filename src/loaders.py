@@ -395,6 +395,35 @@ def pull_player_heights(ids: list[int]) -> dict[int, int]:
     return out
 
 
+def cached_player_heights(ids: list[int], cache_path: str | Path) -> dict[int, int]:
+    """Listed heights for `ids` -> {mlbam_id: inches}, fetching only what's missing.
+
+    Heights barely ever change, so hitting the MLB API for every player on every
+    run is wasteful. This keeps a small CSV (columns: id, height_in) at
+    `cache_path`: ids already in it are read from disk, the rest are fetched in
+    one batch and appended. Players whose lookup fails are NOT cached, so the
+    next run tries them again. Returns only the ids it has a height for.
+    """
+    path = Path(cache_path)
+    cached: dict[int, int] = {}
+    if path.exists():
+        saved = pd.read_csv(path)
+        cached = dict(zip(saved["id"].astype(int), saved["height_in"].astype(int)))
+
+    wanted = list(dict.fromkeys(int(i) for i in ids))
+    missing = [i for i in wanted if i not in cached]
+    if missing:
+        fetched = pull_player_heights(missing)
+        if fetched:
+            cached.update(fetched)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame(
+                {"id": list(cached), "height_in": list(cached.values())}
+            ).to_csv(path, index=False)
+
+    return {i: cached[i] for i in wanted if i in cached}
+
+
 def _clean_fg_value_column(s: pd.Series, as_proportion: bool) -> pd.Series:
     """Try to turn one string column of FanGraphs values into numbers.
 

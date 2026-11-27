@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
@@ -59,6 +60,12 @@ class NoData(ReportError):
 
 class DataQualityError(ReportError):
     """The pulled data is present but structurally broken (failed validation)."""
+
+
+# matplotlib keeps global state (current figure, style settings), so two web
+# requests drawing at once can affect each other. Anything that draws takes
+# this lock first; the web app's VAA page uses the same one.
+PLOT_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -296,14 +303,15 @@ def _pitcher_report(df, name, player_id, start, end) -> str:
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
 
-    return pitcher_html_report(
-        arsenal, location, splits,
-        pitcher_name=name,
-        throws=throws_label(df),
-        pitches=df,                                # enables the Visuals charts
-        percentiles=pctiles,
-        percentile_season=season,
-    )
+    with PLOT_LOCK:
+        return pitcher_html_report(
+            arsenal, location, splits,
+            pitcher_name=name,
+            throws=throws_label(df),
+            pitches=df,                            # enables the Visuals charts
+            percentiles=pctiles,
+            percentile_season=season,
+        )
 
 
 def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
@@ -326,16 +334,17 @@ def _hitter_report(df, name, player_id, start, end) -> tuple[str, int]:
     except Exception as exc:  # noqa: BLE001 — percentiles are optional context
         print(f"[percentiles] skipped for {name} ({season}): {exc}", file=sys.stderr)
 
-    html = hitter_html_report(
-        overall, platoon,
-        hitter_name=name,
-        bats=bats_label(df),
-        batted_balls_df=bbe,
-        pitches_df=df,          # full pitch-level frame -> swing-geometry section
-        player_id=player_id,
-        percentiles=pctiles,
-        percentile_season=season,
-    )
+    with PLOT_LOCK:
+        html = hitter_html_report(
+            overall, platoon,
+            hitter_name=name,
+            bats=bats_label(df),
+            batted_balls_df=bbe,
+            pitches_df=df,      # full pitch-level frame -> swing-geometry section
+            player_id=player_id,
+            percentiles=pctiles,
+            percentile_season=season,
+        )
     return html, int(row["n_bbe"])
 
 

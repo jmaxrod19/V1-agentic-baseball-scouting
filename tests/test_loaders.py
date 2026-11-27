@@ -109,3 +109,34 @@ def test_fangraphs_as_proportion_divides_percents_by_100():
     # With as_proportion=True, "28.5 %" -> 0.285 for math/joins with Statcast.
     judge = df[df["Name"] == "Aaron Judge"].iloc[0]
     assert judge["K%"] == pytest.approx(0.285)
+
+
+# ---------------------------------------------------------------------------
+# cached_player_heights: only ask the MLB API for ids we don't already have.
+# ---------------------------------------------------------------------------
+
+def test_cached_player_heights_fetches_only_missing_and_saves(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_pull(ids):
+        calls.append(list(ids))
+        return {i: 70 + (i % 5) for i in ids}
+
+    monkeypatch.setattr(loaders, "pull_player_heights", fake_pull)
+    cache = tmp_path / "heights.csv"
+
+    first = loaders.cached_player_heights([1, 2, 3], cache)
+    assert first == {1: 71, 2: 72, 3: 73}
+    assert calls == [[1, 2, 3]]
+
+    # Second run: 1-3 come from disk, only 4 is fetched.
+    second = loaders.cached_player_heights([2, 3, 4], cache)
+    assert second == {2: 72, 3: 73, 4: 74}
+    assert calls == [[1, 2, 3], [4]]
+
+
+def test_cached_player_heights_does_not_cache_failed_lookups(tmp_path, monkeypatch):
+    monkeypatch.setattr(loaders, "pull_player_heights", lambda ids: {})   # API down
+    cache = tmp_path / "heights.csv"
+    assert loaders.cached_player_heights([1, 2], cache) == {}
+    assert not cache.exists()                                            # nothing saved
