@@ -26,16 +26,19 @@ def main() -> None:
 
     csv = Path(args.csv) if args.csv else ROOT / f"data/raw/statcast_{args.season}.csv"
     data = loaders.load_statcast_csv(csv)
+    ids = [int(i) for i in data["pitcher"].dropna().unique()]
+    # Outfielders and catchers who mopped up an inning: their lobs are not fastballs.
+    position_players = loaders.pull_position_players(ids)
+    print(f"leaving out {len(position_players)} position players who pitched")
     # Listed heights from the MLB API, cached on disk so reruns are instant.
-    heights = loaders.cached_player_heights(
-        [int(i) for i in data["pitcher"].dropna().unique()], HEIGHT_CACHE
-    )
-    table = vaa_season.build_season_table(data, args.season, heights)
+    heights = loaders.cached_player_heights(ids, HEIGHT_CACHE)
+    table = vaa_season.build_season_table(data, args.season, heights, position_players)
 
     out = ROOT / f"app_data/vaa_fastball_{args.season}.csv"
     out.parent.mkdir(exist_ok=True)
     table.to_csv(out, index=False, float_format="%.8g")   # 8 digits: plenty, and compact
-    pitchers = int((table["role"] == "pitcher").sum())
+    # One "all" row per pitcher; the other parts of the zone would count them again.
+    pitchers = int(((table["role"] == "pitcher") & (table["part"] == "all")).sum())
     print(f"{pitchers} pitchers -> {out} ({out.stat().st_size / 1000:.0f} KB)")
 
 

@@ -1,5 +1,7 @@
 """Smoke tests for the VAA chart prototypes: they draw, and they fail loudly."""
 
+from dataclasses import replace
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -61,7 +63,7 @@ def test_compare_to_league_3d_raises_on_untraceable_side():
 
 
 # ---------------------------------------------------------------------------
-# Prototype A6: modeled paths, tangents, true-scale diagram, cards.
+# Prototype A6: modeled paths, tangents, cards.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -98,36 +100,51 @@ def test_tangent_lines_have_the_arrival_slope(comparison, figure):
         assert angle == pytest.approx(side.modeled.vaa)
 
 
-def test_angle_diagram_is_true_scale_on_screen(comparison, figure):
-    lines = _lines(figure, "angle-line")
-    for line, side in zip(lines, (comparison.league, comparison.pitcher)):
-        # Measure the angle in PIXELS, as a viewer would see it.
-        (x0, y0), (x1, y1) = line.axes.transData.transform(line.get_xydata())
-        on_screen = -np.degrees(np.arctan2(y0 - y1, x1 - x0))
-        assert on_screen == pytest.approx(side.modeled.vaa, abs=0.02)
-
-
 def test_cards_carry_every_metric_and_survive_missing_arm_angle(comparison):
     cards = vaa_charts._cards(comparison)
     assert [card["title"] for card in cards] == [
-        "RELEASE HEIGHT", "EXTENSION", "ARM ANGLE", "VELOCITY", "VERTICAL BREAK"]
+        "RELEASE HEIGHT", "EXTENSION", "ARM ANGLE", "VELOCITY", "RIDE (IVB)"]
     assert cards[0]["effect"].endswith("flatter")
-    assert cards[2]["effect"] == "not a direct input"
+    assert cards[2]["effect"] == "shown for context"
 
     blind = vaa_model.compare_fastball(_league().drop(columns=["arm_angle", "sz_bot", "sz_top"]), 1)
     assert vaa_charts._cards(blind)[2]["value"] == "n/a"
     plt.close(vaa_charts.fastball_vaa_chart(blind))          # no heights, no zone: still draws
 
 
-def test_reason_names_the_biggest_factor(comparison):
-    assert "a lower release (+" in vaa_charts._reason(comparison)
+def test_why_names_the_main_trait_in_plain_baseball_terms(comparison):
+    why = vaa_charts._why(comparison)
+    assert why.startswith("Why: His release height is about ")
+    assert why.endswith("lower than most pitchers.")
+    assert "°" not in why
 
 
-def test_signed_and_effect_text():
-    assert vaa_charts._signed(0.94) == "+0.9°"
-    assert vaa_charts._signed(-0.02) == "0.0°"
-    assert vaa_charts._effect_text(0.01) == "no real change"
-    assert vaa_charts._effect_text(-0.31) == "-0.3° steeper"
+def test_header_shows_two_angles_that_agree_with_the_verdict(comparison, figure):
+    texts = [t.get_text() for t in figure.axes[0].texts]
+    assert "HIS VAA" in texts and "MLB VAA, SAME HEIGHT" in texts
+    his, typical = (float(t.rstrip("°")) for t in texts if t.endswith("°"))
+    assert his - typical == pytest.approx(round(comparison.pitcher.vaa_aa, 1))
+
+
+def test_effects_and_lengths_are_words_not_decimals():
+    assert vaa_charts._effect_text(0.1) == "little effect"
+    assert vaa_charts._effect_text(0.4) == "makes it flatter"
+    assert vaa_charts._effect_text(-0.4) == "makes it steeper"
+    assert vaa_charts._length(-1.07) == "1 ft"
+    assert vaa_charts._length(1.4) == "1.5 ft"
+    assert vaa_charts._length(0.4) == "5 in"
+
+
+def test_a_whole_season_is_named_instead_of_dated(comparison):
+    whole = replace(comparison, first_date="Mar 25", last_date="Sep 27")
+    part = replace(comparison, first_date="Apr 1", last_date="Jun 30")
+    for c, expected, dated in ((whole, "full season", False), (part, "Apr 1–Jun 30", True)):
+        fig = vaa_charts.fastball_vaa_chart(c)
+        header = " ".join(t.get_text() for t in fig.axes[0].texts)
+        plt.close(fig)
+        assert expected in header and ("Jun 30" in header) == dated
+    assert vaa_charts._sample_warning(whole).endswith("four-seamers all season")
+    assert not vaa_charts._sample_warning(part).endswith("all season")
 
 
 def test_format_height():
