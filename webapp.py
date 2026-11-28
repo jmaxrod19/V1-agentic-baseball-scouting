@@ -139,6 +139,17 @@ _PAGE_CSS = """
   .method summary { cursor:pointer; font-weight:700; }
   .method li { margin:0 0 6px; }
   .picks li { margin:0 0 8px; }
+  .notice { background:var(--panel); border:1px solid var(--line);
+            border-radius:10px; padding:22px; }
+  .notice h1 { font-size:26px; }
+  .feature .computers { color:#fff; font-size:14px; }
+  .phone-only { display:none; }
+  /* Phones (narrow, or a touch screen held sideways): the VAA charts cannot be
+     read there, so show the notice instead of the tool. */
+  @media (max-width:700px), (pointer:coarse) and (max-height:500px) {
+    .computer-only { display:none; }
+    .phone-only { display:block; }
+  }
   .error { background:var(--panel); border:1px solid var(--accent);
            border-radius:10px; padding:22px; }
   .error h2 { margin:0 0 8px; color:var(--accent); }
@@ -188,6 +199,7 @@ _VAA_FEATURE = f"""
     <h2>How flat is that fastball?</h2>
     <p>Search any pitcher’s four-seamer. See its vertical approach angle next to the
        MLB average, and why it comes in that way.</p>
+    <p class=computers><b>For computers only:</b> the charts are too detailed for a phone.</p>
     <span class=cta>Explore Fastball VAA →</span>
   </a>
 """
@@ -464,10 +476,27 @@ def _primary_note(pitcher: pd.Series) -> str:
             f"in {_VAA_SEASON}. His main pitch was the {html.escape(main)} ({most}).</div>")
 
 
+# What a phone shows in place of the VAA tool (see the @media rule in _PAGE_CSS).
+_PHONE_NOTICE = """
+  <div class="phone-only notice">
+    <h1>Fastball VAA is a computer feature</h1>
+    <p>Its charts are too detailed to read on a phone. Open this page on a computer
+       to search any pitcher.</p>
+    <p><a href=/>← Scouting reports</a></p>
+  </div>
+"""
+
+
+def _vaa_html(body: str, title: str = "Fastball VAA", wide: bool = False) -> HTMLResponse:
+    """Every /vaa response: the tool for computers, the notice for phones."""
+    both = f"{_PHONE_NOTICE}<div class=computer-only>{body}</div>"
+    return HTMLResponse(_page(both, title, wide=wide))
+
+
 def _vaa_message(message: str, value: str = "") -> HTMLResponse:
     """The search page again, with an explanation above the form."""
     note = f"<div class=error><p>{html.escape(message)}</p></div><br>"
-    return HTMLResponse(_page(_vaa_intro() + note + _vaa_form(value), "Fastball VAA"))
+    return _vaa_html(_vaa_intro() + note + _vaa_form(value))
 
 
 @app.get("/vaa", response_class=HTMLResponse)
@@ -499,10 +528,10 @@ def vaa_page(name: str = "", pitcher: str = "", zone: str = "all") -> HTMLRespon
             more = "" if len(matches) <= 30 else "<p class=note>Showing 30. Type more of the name.</p>"
             choices = f"<p>Which pitcher?</p><ul class=picks>{items}</ul>{more}"
             body = _vaa_intro() + _vaa_form(name, zone) + choices
-            return HTMLResponse(_page(body, "Fastball VAA"))
+            return _vaa_html(body)
         pitcher_id = int(matches.iloc[0]["pitcher_id"])
     else:
-        return HTMLResponse(_page(_vaa_intro() + _vaa_form(part=zone), "Fastball VAA"))
+        return _vaa_html(_vaa_intro() + _vaa_form(part=zone))
 
     pitchers = _vaa_pitchers()
     mine = pitchers[pitchers["pitcher_id"] == pitcher_id]
@@ -530,4 +559,4 @@ def vaa_page(name: str = "", pitcher: str = "", zone: str = "all") -> HTMLRespon
       {chart}
       {_VAA_STORY}
     """
-    return HTMLResponse(_page(body, f"{safe_name} · Fastball VAA", wide=True))
+    return _vaa_html(body, f"{safe_name} · Fastball VAA", wide=True)

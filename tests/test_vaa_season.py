@@ -310,3 +310,21 @@ def test_method_notes_are_on_the_page_but_folded_away(page):
     text = page(name="Test Arm1")
     assert "<details class=method><summary>How this is calculated</summary>" in text
     assert text.index("data:image/png") < text.index("class=method")
+
+
+@pytest.mark.parametrize("params", [
+    {}, {"name": "Test Arm1"}, {"name": "arm1"}, {"name": "Nobody"}, {"pitcher": "abc"},
+])
+def test_every_vaa_page_has_a_notice_for_phones_and_hides_the_tool_there(page, params):
+    text = page(**params)
+    assert text.count("Fastball VAA is a computer feature") == 1
+    wrapper = text.index("<div class=computer-only>")
+    # The notice sits outside the part phones hide; everything else is inside it.
+    assert text.index("phone-only notice") < wrapper < text.index("<form")
+    assert "@media (max-width:700px)" in text
+
+
+def test_the_home_page_says_vaa_is_for_computers():
+    text = webapp.home()
+    assert "For computers only" in text
+    assert "<div class=computer-only>" not in text           # reports still work on phones
